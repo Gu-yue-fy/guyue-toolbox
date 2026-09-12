@@ -1,0 +1,24 @@
+# ===== Visual Studio / C# (.NET Framework 4.8，用系统 csc.exe 编译) =====
+bin/
+obj/
+*.user
+*.suo
+.vs/
+# 编译产物不入库，安装包通过 GitHub Releases 发布
+*.exe
+*.msi
+*.zip
+
+# ===== 系统 / 编辑器 =====
+.DS_Store
+Thumbs.db
+*.log
+
+# ===== 依赖（若以后引入前端构建） =====
+node_modules/
+
+# ===== 截图占位（放入真实截图后可删除此条，或保留忽略占位图） =====
+assets/img/screenshot.png
+
+# 本地项目记忆，不入库
+.workbuddy/
