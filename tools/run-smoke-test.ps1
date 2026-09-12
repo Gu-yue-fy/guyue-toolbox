@@ -1,4 +1,4 @@
-<#
+﻿<#
     Build and run the read-only smoke test.
     It never modifies system settings and never deletes files.
 
@@ -44,7 +44,7 @@ $a += '/target:exe'
 $a += '/platform:anycpu'
 $a += '/langversion:5'
 $a += '/codepage:65001'
-$a += '/main:SysToolbox.Test.SmokeTest'
+$a += '/main:GuyueBox.Test.SmokeTest'
 $a += ('/out:' + $q + $out + $q)
 $a += $refs
 foreach ($s in $sources) { $a += ($q + $s + $q) }

@@ -1,8 +1,8 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Microsoft.Win32;
 
-namespace SysToolbox.Core
+namespace GuyueBox.Core
 {
     public sealed class ContextEntry
     {

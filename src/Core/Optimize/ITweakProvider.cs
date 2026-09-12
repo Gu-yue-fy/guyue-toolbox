@@ -1,6 +1,6 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
-namespace SysToolbox.Core
+namespace GuyueBox.Core
 {
     /// <summary>
     /// 优化项 Provider：一组优化项的独立装配单元。

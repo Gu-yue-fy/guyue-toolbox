@@ -1,9 +1,9 @@
-using System;
+﻿﻿using System;
 using System.Drawing;
 using System.Windows.Forms;
-using SysToolbox.Core;
+using GuyueBox.Core;
 
-namespace SysToolbox.UI.Views
+namespace GuyueBox.UI.Views
 {
     /// <summary>
     /// 软件设置：主题色、动画开关、启动检查更新。改动即时生效并保存。
@@ -34,7 +34,7 @@ namespace SysToolbox.UI.Views
             _info.CaptionColor = Theme.Accent;
             _info.Add("软件版本", "v" + MainForm.AppVersion);
             _info.Add("优化项数量", TweakLibrary.All().Count + " 项");
-            _info.Add("设置位置", "HKCU\\Software\\SysToolbox\\Settings");
+            _info.Add("设置位置", "HKCU\\Software\\GuyueBox\\Settings");
             _info.Invalidate();
 
             BuildThemeRow();

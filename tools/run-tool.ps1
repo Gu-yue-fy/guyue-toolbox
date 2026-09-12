@@ -1,4 +1,4 @@
-<#
+﻿<#
     Generic build-and-run helper for development tools under tools\.
 
     Usage:
@@ -47,7 +47,7 @@ $a += '/target:exe'
 $a += '/platform:anycpu'
 $a += '/langversion:5'
 $a += '/codepage:65001'
-$a += ('/main:SysToolbox.Test.' + $Tool)
+$a += ('/main:GuyueBox.Test.' + $Tool)
 $a += ('/out:' + $q + $out + $q)
 $a += $refs
 foreach ($s in $sources) { $a += ($q + $s + $q) }

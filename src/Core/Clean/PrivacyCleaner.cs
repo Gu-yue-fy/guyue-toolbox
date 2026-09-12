@@ -1,9 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using Microsoft.Win32;
 
-namespace SysToolbox.Core
+namespace GuyueBox.Core
 {
     /// <summary>一个可清理的隐私痕迹项。</summary>
     public sealed class PrivacyItem

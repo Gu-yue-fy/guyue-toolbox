@@ -1,10 +1,10 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
-using SysToolbox.Core;
+using GuyueBox.Core;
 
-namespace SysToolbox.UI
+namespace GuyueBox.UI
 {
     /// <summary>圆形图标入口：大圆底 + 图标 + 下方文字，类似管家/火绒的快捷入口。</summary>
     public class RoundEntry : Control

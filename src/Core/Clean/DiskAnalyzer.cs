@@ -1,9 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 
-namespace SysToolbox.Core
+namespace GuyueBox.Core
 {
     /// <summary>
     /// 磁盘空间分析：遍历指定根目录，找出占用空间最大的文件与目录。

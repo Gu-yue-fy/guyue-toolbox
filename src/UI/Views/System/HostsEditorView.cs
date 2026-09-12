@@ -1,10 +1,10 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
-using SysToolbox.Core;
+using GuyueBox.Core;
 
-namespace SysToolbox.UI.Views
+namespace GuyueBox.UI.Views
 {
     /// <summary>
     /// Hosts 编辑器：查看与编辑系统 hosts 文件（自动备份原文件）。

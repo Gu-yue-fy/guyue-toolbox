@@ -1,11 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 
-namespace SysToolbox.Core
+namespace GuyueBox.Core
 {
     public sealed class AdapterInfo
     {

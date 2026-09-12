@@ -1,9 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 
-namespace SysToolbox.UI
+namespace GuyueBox.UI
 {
     /// <summary>
     /// 缓存 SolidBrush / Pen / StringFormat / GraphicsPath。

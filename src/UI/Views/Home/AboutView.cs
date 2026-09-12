@@ -1,11 +1,11 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Reflection;
 using System.Threading;
 using System.Windows.Forms;
-using SysToolbox.Core;
+using GuyueBox.Core;
 
-namespace SysToolbox.UI.Views
+namespace GuyueBox.UI.Views
 {
     /// <summary>
     /// 关于与更新：版本信息、检查更新（GitHub Releases 方式）与项目主页入口。
@@ -27,6 +27,7 @@ namespace SysToolbox.UI.Views
 
             AddAction("打开项目主页", "network", ButtonVariant.Ghost, OnOpenProject);
             _checkButton = AddAction("检查更新", "refresh", ButtonVariant.Primary, OnCheckUpdate, 128);
+            AddAction("自定义更新源", "doc", ButtonVariant.Ghost, OnSetSource, 140);
 
             _info.Caption = "版本信息";
             _info.IconKind = "info";
@@ -126,6 +127,26 @@ namespace SysToolbox.UI.Views
                     }
                 });
             });
+        }
+
+        /// <summary>自定义更新源（清空则恢复默认 GitHub 源）。</summary>
+        private void OnSetSource(object sender, EventArgs e)
+        {
+            string current = UpdateChecker.UpdateSource();
+            string input = Dialog.Input(this, "自定义更新源",
+                "填入托管 update.json 的地址（留空恢复默认 GitHub 源）：", current);
+            if (input == null) return;
+            input = input.Trim();
+            if (input.Length > 0 && !input.StartsWith("http", StringComparison.OrdinalIgnoreCase) &&
+                !input.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+            {
+                Dialog.Info(this, "地址无效", "更新源必须以 http(s):// 或 file: 开头。");
+                return;
+            }
+            UpdateChecker.SetUpdateSource(input);
+            SetSubtitle(input.Length == 0
+                ? "已恢复默认 GitHub 更新源。"
+                : "更新源已设置：" + input, Theme.Success);
         }
 
         private void OnOpenProject(object sender, EventArgs e)

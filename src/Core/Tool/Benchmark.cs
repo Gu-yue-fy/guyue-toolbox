@@ -1,11 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Threading;
 
-namespace SysToolbox.Core
+namespace GuyueBox.Core
 {
     /// <summary>一次基准测试结果。</summary>
     public sealed class BenchmarkResult
@@ -91,7 +91,7 @@ namespace SysToolbox.Core
             {
                 return Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                    "SysToolbox", "benchmarks.csv");
+                    "GuyueBox", "benchmarks.csv");
             }
         }
 
@@ -212,7 +212,7 @@ namespace SysToolbox.Core
         {
             writeMBs = 0;
             readMBs = 0;
-            string tmp = Path.Combine(Path.GetTempPath(), "SysToolbox_benchmark.tmp");
+            string tmp = Path.Combine(Path.GetTempPath(), "GuyueBox_benchmark.tmp");
             int chunk = 8 * 1024 * 1024;
             int totalMB = 256;
             int loops = totalMB / 8;
@@ -333,7 +333,7 @@ namespace SysToolbox.Core
         /// <summary>磁盘 4K 随机读 IOPS——系统响应速度与小文件场景的关键指标。</summary>
         private static int Disk4kRandomRead()
         {
-            string tmp = Path.Combine(Path.GetTempPath(), "SysToolbox_bench4k.tmp");
+            string tmp = Path.Combine(Path.GetTempPath(), "GuyueBox_bench4k.tmp");
             try
             {
                 const int fileMB = 32;

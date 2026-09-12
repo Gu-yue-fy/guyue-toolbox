@@ -1,11 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Threading;
 using System.Windows.Forms;
-using SysToolbox.Core;
+using GuyueBox.Core;
 
-namespace SysToolbox.UI.Views
+namespace GuyueBox.UI.Views
 {
     /// <summary>
     /// 网络中心（仪表式单页）：顶部网络状态卡（联网/网关/外网/DNS），
@@ -130,7 +130,7 @@ namespace SysToolbox.UI.Views
             _portKill = MakeInlineButton("结束占用进程", ButtonVariant.Danger, OnPortKill, 140);
             _portKill.Enabled = false;
             portRow.Controls.Add(_portKill);
-            Label portTip = MakeLabel("输入端口号回车查询；占用进程可一键结束", 0, false);
+            Label portTip = MakeLabel("输入端口号回车查询；占用进程可一键结束", 280, false);
             portTip.Margin = new Padding(12, 8, 0, 0);
             portRow.Controls.Add(portTip);
             AddRow(portRow);
@@ -144,7 +144,23 @@ namespace SysToolbox.UI.Views
             _portGrid.AddTextColumn("进程", 200, false);
             AddFull(_portGrid, 190, 0);
 
-            // ⑤ 诊断结果
+            // ⑤ 网络调优（TCP 参数 / ARP 缓存）
+            FlowLayoutPanel tuneRow = MakeRow(0, 10);
+            tuneRow.Controls.Add(MakeLabel("网络调优", 84, true));
+            AccentButton tcpApply = MakeInlineButton("TCP 调优", ButtonVariant.Primary, OnTcpTune, 110);
+            tuneRow.Controls.Add(tcpApply);
+            AccentButton tcpRestore = MakeInlineButton("恢复 TCP 默认", ButtonVariant.Ghost, OnTcpRestore, 130);
+            tuneRow.Controls.Add(tcpRestore);
+            AccentButton arpClear = MakeInlineButton("清理 ARP 缓存", ButtonVariant.Ghost, delegate { RunRepair("清理 ARP 缓存", delegate { return NetTools.ClearArpCache(); }, false); }, 130);
+            tuneRow.Controls.Add(arpClear);
+            AccentButton tcpView = MakeInlineButton("查看 TCP 参数", ButtonVariant.Ghost, OnTcpView, 130);
+            tuneRow.Controls.Add(tcpView);
+            Label tuneTip = MakeLabel("调优开启 ECN/RSS/接收窗口自动调整，适合宽带与游戏", 330, false);
+            tuneTip.Margin = new Padding(12, 8, 0, 0);
+            tuneRow.Controls.Add(tuneTip);
+            AddRow(tuneRow);
+
+            // ⑥ 诊断结果
             FlowLayoutPanel diagRow = MakeRow(0, 14);
             diagRow.Controls.Add(_diag);
             AddRow(diagRow);
@@ -447,6 +463,39 @@ namespace SysToolbox.UI.Views
         }
 
         // ---------------- 修复 ----------------
+
+        private void OnTcpTune(object sender, EventArgs e)
+        {
+            if (!Dialog.Confirm(this, "TCP 调优",
+                "将应用以下网络参数优化：\r\n" +
+                "  · 接收窗口自动调整 = normal\r\n  · ECN 拥塞通知 = enabled\r\n" +
+                "  · RSS 接收方缩放 = enabled\r\n  · TCP 时间戳 = disabled\r\n  · TCP 窗口启发式 = disabled\r\n\r\n" +
+                "立即生效，无需重启。是否继续？")) return;
+            RunRepair("TCP 调优", delegate { return NetTools.ApplyTcpTuning(); }, false);
+        }
+
+        private void OnTcpRestore(object sender, EventArgs e)
+        {
+            RunRepair("恢复 TCP 默认", delegate { return NetTools.RestoreTcpDefaults(); }, false);
+        }
+
+        private void OnTcpView(object sender, EventArgs e)
+        {
+            if (_busy) return;
+            _busy = true;
+            SetSubtitle("正在读取 TCP 全局参数…", Theme.Warning);
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                string text = "";
+                try { text = NetTools.GetTcpGlobal(); } catch (Exception ex) { text = ex.Message; }
+                Post(delegate
+                {
+                    _busy = false;
+                    Dialog.Output(this, "TCP 全局参数（netsh int tcp show global）",
+                        string.IsNullOrEmpty(text) ? "（无输出）" : text);
+                });
+            });
+        }
 
         private void RunRepair(string title, Func<string> action, bool needReboot)
         {

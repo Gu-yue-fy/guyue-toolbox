@@ -1,10 +1,10 @@
-using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 using Microsoft.Win32;
 
-namespace SysToolbox.Core
+namespace GuyueBox.Core
 {
     /// <summary>
     /// 一条注册表备份记录。用于让每一项优化都可以被还原。
@@ -163,7 +163,7 @@ namespace SysToolbox.Core
     /// </summary>
     public static class RegHelper
     {
-        private const string BackupRoot = @"Software\SysToolbox\Backup";
+        private const string BackupRoot = @"Software\GuyueBox\Backup";
 
         // 基键句柄缓存：HKLM/HKCU 等基键进程级常驻，省掉每次读写的 RegOpenKey/RegCloseKey
         // 系统调用（优化中心状态探测一轮要数千次）。共享句柄绝不 Dispose，由进程退出统一回收。

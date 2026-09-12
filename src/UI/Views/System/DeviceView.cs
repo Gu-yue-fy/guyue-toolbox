@@ -1,13 +1,13 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
-using SysToolbox.Core;
+using GuyueBox.Core;
 
-namespace SysToolbox.UI.Views
+namespace GuyueBox.UI.Views
 {
     /// <summary>
     /// 设备管理：枚举即插即用设备（状态/类/名称），支持禁用与启用选中设备。

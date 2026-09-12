@@ -1,4 +1,4 @@
-using System;
+﻿﻿using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
@@ -9,7 +9,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Win32;
 
-namespace SysToolbox.Core
+namespace GuyueBox.Core
 {
     public sealed class UpdateInfo
     {
@@ -58,12 +58,12 @@ namespace SysToolbox.Core
     {
         /// <summary>
         /// 默认更新源（GitHub 开源发布方式，推荐）：
-        /// 1. 发版时在 GitHub 建 Release（tag 如 v1.0.1），上传 SysToolbox.exe 作为 asset；
+        /// 1. 发版时在 GitHub 建 Release（tag 如 v1.0.1），上传 GuyueBox.exe 作为 asset；
         /// 2. 把 update.json（version/url/sha256 字段）提交到仓库，此处填 raw 直链；
         ///    url 字段填 Release asset 的下载地址（浏览器可达的直链）。
         /// 也可在「关于与更新」页自定义更新源（仍兼容任意托管 update.json 的地址）。
         /// </summary>
-        public const string DefaultUpdateUrl = "https://raw.githubusercontent.com/Gu-yue-fy/guyue-toolbox-site/main/update.json";
+        public const string DefaultUpdateUrl = "https://raw.githubusercontent.com/Gu-yue-fy/guyue-toolbox/main/update.json";
 
         /// <summary>项目主页（「关于与更新」页跳转用）。发布前把 your-name 替换为实际 GitHub 用户名。</summary>
         public const string ProjectUrl = "https://github.com/Gu-yue-fy/guyue-toolbox";
@@ -80,7 +80,7 @@ namespace SysToolbox.Core
             get { return ProjectUrl.IndexOf("your-name", StringComparison.OrdinalIgnoreCase) < 0; }
         }
 
-        private const string ConfigPath = @"Software\SysToolbox";
+        private const string ConfigPath = @"Software\GuyueBox";
 
         /// <summary>最近一次检查结果（进程内缓存）。</summary>
         public static UpdateInfo Latest;
@@ -137,7 +137,7 @@ namespace SysToolbox.Core
                 using (WebClient wc = new WebClient())
                 {
                     wc.Headers["Cache-Control"] = "no-cache";
-                    wc.Headers["User-Agent"] = "SysToolbox-UpdateCheck"; // GitHub 要求非空 UA
+                    wc.Headers["User-Agent"] = "GuyueBox-UpdateCheck"; // GitHub 要求非空 UA
                     wc.Encoding = Encoding.UTF8;
                     string target = url;
                     // 仅对 http(s) 加缓存穿透参数（file:// 等本地测试地址不支持 query）
@@ -179,7 +179,7 @@ namespace SysToolbox.Core
             error = "";
             try
             {
-                string tmp = Path.Combine(Path.GetTempPath(), "SysToolbox_update_" +
+                string tmp = Path.Combine(Path.GetTempPath(), "GuyueBox_update_" +
                     DateTime.Now.Ticks.ToString(CultureInfo.InvariantCulture) + ".exe");
 
                 using (WebClient wc = new WebClient())
@@ -221,25 +221,34 @@ namespace SysToolbox.Core
         /// <summary>
         /// 启动外部替换脚本（等待本程序退出 → 覆盖 → 重启），由调用方随后退出程序。
         /// 用 PowerShell（UTF-8 BOM 脚本）替代 cmd 批处理——中文安装路径在 ANSI 批处理下会乱码导致复制失败。
+        /// 火忘式启动：绝不等待脚本结束（脚本含 Start-Sleep 与杀进程，等待会冻结 UI 线程 2-3 秒以上）。
         /// </summary>
         public static bool ApplyUpdate(string newExe)
         {
             try
             {
                 string current = Assembly.GetEntryAssembly().Location;
-                string script = Path.Combine(Path.GetTempPath(), "SysToolbox_update.ps1");
+                string script = Path.Combine(Path.GetTempPath(), "GuyueBox_update.ps1");
 
                 StringBuilder sb = new StringBuilder();
                 sb.AppendLine("Start-Sleep -Seconds 2");
-                sb.AppendLine("Get-Process SysToolbox -ErrorAction SilentlyContinue | Stop-Process -Force");
+                sb.AppendLine("Get-Process GuyueBox -ErrorAction SilentlyContinue | Stop-Process -Force");
                 sb.AppendLine("Start-Sleep -Seconds 1");
                 sb.AppendLine("Copy-Item -LiteralPath '" + newExe.Replace("'", "''") + "' -Destination '" +
                     current.Replace("'", "''") + "' -Force");
                 sb.AppendLine("Start-Process -FilePath '" + current.Replace("'", "''") + "'");
 
                 File.WriteAllText(script, sb.ToString(), new UTF8Encoding(true)); // BOM：中文路径不乱码
-                Shell.Run("powershell.exe",
-                    "-NoProfile -ExecutionPolicy Bypass -File \"" + script + "\"", 0);
+                using (System.Diagnostics.Process p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "powershell.exe",
+                    Arguments = "-NoProfile -ExecutionPolicy Bypass -File \"" + script + "\"",
+                    CreateNoWindow = true,
+                    UseShellExecute = false
+                }))
+                {
+                    // 火忘：不 WaitForExit，调用方立即 Application.Exit，脚本独立完成替换与重启
+                }
                 return true;
             }
             catch

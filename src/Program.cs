@@ -1,10 +1,10 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Windows.Forms;
-using SysToolbox.Core;
-using SysToolbox.UI;
+using GuyueBox.Core;
+using GuyueBox.UI;
 
-namespace SysToolbox
+namespace GuyueBox
 {
     internal static class Program
     {
@@ -22,7 +22,7 @@ namespace SysToolbox
             // 多实例提示
             bool createdNew;
             // Local\ 前缀：避免多用户 / 远程桌面会话间的互斥体命名冲突
-            using (Mutex mutex = new Mutex(true, @"Local\SysToolbox.SingleInstance", out createdNew))
+            using (Mutex mutex = new Mutex(true, @"Local\GuyueBox.SingleInstance", out createdNew))
             {
                 if (!createdNew)
                 {

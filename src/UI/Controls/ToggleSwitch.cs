@@ -1,8 +1,8 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Windows.Forms;
 
-namespace SysToolbox.UI
+namespace GuyueBox.UI
 {
     /// <summary>
     /// 开关控件。用于表达"已优化 / 未优化"这类二元状态，比一对按钮更直观也更安静。

@@ -1,9 +1,9 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
-namespace SysToolbox.UI
+namespace GuyueBox.UI
 {
     /// <summary>自绘复选框单元格，避免系统主题在深色背景下突兀。</summary>
     public class DarkCheckCell : DataGridViewCheckBoxCell

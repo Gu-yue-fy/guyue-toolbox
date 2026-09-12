@@ -1,16 +1,16 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 
-namespace SysToolbox.UI
+namespace GuyueBox.UI
 {
     /// <summary>
     /// 以「标签 — 值」形式展示一组信息的面板。
     /// </summary>
     public class InfoList : RoundPanel
     {
-        public const int RowHeight = 28;
+        public const int RowHeight = 25;
 
         private readonly List<string[]> _rows = new List<string[]>();
         private int _labelWidth = 0;

@@ -1,8 +1,8 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 
-namespace SysToolbox.UI
+namespace GuyueBox.UI
 {
     /// <summary>
     /// 全局配色与字体。深色主题，蓝紫作为强调色。

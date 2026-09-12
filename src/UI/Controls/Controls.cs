@@ -1,10 +1,11 @@
-﻿using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
+using GuyueBox.Core;
 
-namespace SysToolbox.UI
+namespace GuyueBox.UI
 {
     // ===================================================================
     // 基础面板
@@ -700,6 +701,9 @@ namespace SysToolbox.UI
         public Color AccentColor = Theme.Accent;
         public string FooterText = "";
 
+        private double _shownPercent = -1;   // 进度条当前显示值（向 Percent 缓动）
+        private System.Windows.Forms.Timer _anim;
+
         public StatCard()
         {
             BackColor = Theme.CardBg;
@@ -714,7 +718,44 @@ namespace SysToolbox.UI
             Percent = percent;
             FooterText = footer;
             AccentColor = accent;
+            StartBarAnim();
             Invalidate();
+        }
+
+        /// <summary>进度条从当前显示值缓动到目标值（关闭动画或首帧则直接到位）。</summary>
+        private void StartBarAnim()
+        {
+            if (!AppSettings.Animations || Percent < 0 || _shownPercent < 0 ||
+                Math.Abs(_shownPercent - Percent) < 0.5)
+            {
+                _shownPercent = Percent;
+                return;
+            }
+            if (_anim == null)
+            {
+                _anim = new System.Windows.Forms.Timer { Interval = 16 };
+                _anim.Tick += delegate
+                {
+                    double diff = Percent - _shownPercent;
+                    if (Math.Abs(diff) < 0.6)
+                    {
+                        _shownPercent = Percent;
+                        _anim.Stop();
+                    }
+                    else
+                    {
+                        _shownPercent += diff * 0.25; // 指数缓动
+                    }
+                    Invalidate();
+                };
+            }
+            _anim.Start();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && _anim != null) _anim.Dispose();
+            base.Dispose(disposing);
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -745,7 +786,8 @@ namespace SysToolbox.UI
             Gfx.FillRound(g, track, 3, Theme.CardBgAlt);
             if (Percent >= 0)
             {
-                int w = (int)(track.Width * Math.Min(100, Math.Max(0, Percent)) / 100.0);
+                double shown = _shownPercent < 0 ? Percent : _shownPercent;
+                int w = (int)(track.Width * Math.Min(100, Math.Max(0, shown)) / 100.0);
                 if (w < 6) w = 6;
                 Gfx.FillRound(g, new Rectangle(track.X, track.Y, w, track.Height), 3, AccentColor);
             }

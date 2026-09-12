@@ -1,9 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 
-namespace SysToolbox.Core
+namespace GuyueBox.Core
 {
     /// <summary>
     /// 一个可清理的垃圾类别。
@@ -542,73 +542,6 @@ namespace SysToolbox.Core
                 try { h(text, percent); }
                 catch { }
             }
-        }
-
-        // ---------------------------------------------------------------
-        // 全盘分析（用于找出大文件，占位实现：扫描用户目录下的前 N 个大文件）
-        // ---------------------------------------------------------------
-
-        public sealed class BigFile
-        {
-            public string Path;
-            public long Size;
-        }
-
-        public static List<BigFile> FindLargeFiles(string root, int top, CancellationToken token)
-        {
-            List<BigFile> found = new List<BigFile>();
-            if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) return found;
-            if (top <= 0) top = 50;
-
-            Stack<string> stack = new Stack<string>();
-            stack.Push(root);
-            int guard = 0;
-
-            while (stack.Count > 0 && guard < 400000)
-            {
-                guard++;
-                if (token.IsCancellationRequested) break;
-                string current = stack.Pop();
-
-                string[] subDirs;
-                try { subDirs = Directory.GetDirectories(current); }
-                catch { subDirs = new string[0]; }
-                for (int i = 0; i < subDirs.Length; i++)
-                {
-                    try
-                    {
-                        DirectoryInfo di = new DirectoryInfo(subDirs[i]);
-                        if ((di.Attributes & FileAttributes.ReparsePoint) != 0) continue;
-                        if ((di.Attributes & FileAttributes.System) != 0) continue;
-                    }
-                    catch { continue; }
-                    stack.Push(subDirs[i]);
-                }
-
-                string[] files;
-                try { files = Directory.GetFiles(current); }
-                catch { files = new string[0]; }
-
-                for (int i = 0; i < files.Length; i++)
-                {
-                    try
-                    {
-                        FileInfo fi = new FileInfo(files[i]);
-                        if (fi.Length < 50L * 1024 * 1024) continue;
-                        BigFile bf = new BigFile();
-                        bf.Path = fi.FullName;
-                        bf.Size = fi.Length;
-                        found.Add(bf);
-                    }
-                    catch
-                    {
-                    }
-                }
-            }
-
-            found.Sort(delegate (BigFile a, BigFile b) { return b.Size.CompareTo(a.Size); });
-            if (found.Count > top) found = found.GetRange(0, top);
-            return found;
         }
     }
 }

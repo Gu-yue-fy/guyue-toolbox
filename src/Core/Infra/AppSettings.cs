@@ -1,16 +1,16 @@
-using System;
+﻿﻿using System;
 using System.Drawing;
 using Microsoft.Win32;
 
-namespace SysToolbox.Core
+namespace GuyueBox.Core
 {
     /// <summary>
-    /// 软件设置（HKCU\Software\SysToolbox\Settings）：
+    /// 软件设置（HKCU\Software\GuyueBox\Settings）：
     /// 主题色、动画开关、启动检查更新。读写均即时生效并落盘。
     /// </summary>
     public static class AppSettings
     {
-        private const string KeyPath = @"Software\SysToolbox\Settings";
+        private const string KeyPath = @"Software\GuyueBox\Settings";
 
         private static int _accentIndex = 0;
         private static bool _animations = true;
@@ -59,6 +59,36 @@ namespace SysToolbox.Core
         private static bool _winMax;
 
         /// <summary>上次关闭时的窗口边界（无记录时 HasWindow=false）。</summary>
+        /// <summary>是否首次运行（读取后即置为 false；用于首页新手指引的一次性展示）。</summary>
+        public static bool FirstRun
+        {
+            get
+            {
+                if (_firstRunRead) return _firstRun;
+                _firstRunRead = true;
+                try
+                {
+                    using (Microsoft.Win32.RegistryKey k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(KeyPath, false))
+                    {
+                        object v = k == null ? null : k.GetValue("FirstRunDone");
+                        _firstRun = v == null || Convert.ToInt32(v) == 0;
+                    }
+                }
+                catch { _firstRun = true; }
+                return _firstRun;
+            }
+        }
+
+        /// <summary>标记首次运行引导已完成。</summary>
+        public static void MarkFirstRunDone()
+        {
+            Save("FirstRunDone", 1);
+            _firstRun = false;
+        }
+
+        private static bool _firstRun = true;
+        private static bool _firstRunRead;
+
         public static bool HasWindowBounds
         {
             get { EnsureWindow(); return _winHas; }

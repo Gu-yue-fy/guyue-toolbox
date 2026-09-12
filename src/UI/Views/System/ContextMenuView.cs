@@ -1,11 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Threading;
 using System.Windows.Forms;
-using SysToolbox.Core;
+using GuyueBox.Core;
 
-namespace SysToolbox.UI.Views
+namespace GuyueBox.UI.Views
 {
     public sealed class ContextMenuView : ViewBase
     {
@@ -100,7 +100,7 @@ namespace SysToolbox.UI.Views
 
             ThreadPool.QueueUserWorkItem(delegate
             {
-                List<ContextEntry> result = SysToolbox.Core.ContextMenu.List();
+                List<ContextEntry> result = GuyueBox.Core.ContextMenu.List();
                 Post(delegate
                 {
                     _busy = false;
@@ -171,7 +171,7 @@ namespace SysToolbox.UI.Views
             ThreadPool.QueueUserWorkItem(delegate
             {
                 string error;
-                bool ok = SysToolbox.Core.ContextMenu.Set(en, enable, out error);
+                bool ok = GuyueBox.Core.ContextMenu.Set(en, enable, out error);
                 Post(delegate
                 {
                     _busy = false;

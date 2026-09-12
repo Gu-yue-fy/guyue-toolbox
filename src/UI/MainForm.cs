@@ -1,13 +1,13 @@
-﻿using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
-using SysToolbox.Core;
-using SysToolbox.UI.Views;
+using GuyueBox.Core;
+using GuyueBox.UI.Views;
 
-namespace SysToolbox.UI
+namespace GuyueBox.UI
 {
     /// <summary>
     /// 主窗体：摒弃传统「侧栏导航 + 多页面」范式，采用命令面板式架构——
@@ -16,7 +16,7 @@ namespace SysToolbox.UI
     /// </summary>
     public sealed class MainForm : Form
     {
-        public const string AppName = "系统优化工具箱";
+        public const string AppName = "古月工具包";
         public const string AppVersion = "1.2.0";
 
         private const int TopBarHeight = 54;
@@ -449,6 +449,27 @@ namespace SysToolbox.UI
             return view;
         }
 
+        private System.Windows.Forms.Timer _pageAnimTimer;
+        private Control _pageAnimNew;
+        private Control _pageAnimOld;
+
+        /// <summary>立即终结进行中的切页动画（快速连点时的竞态防护）。</summary>
+        private void FinishPageAnim()
+        {
+            if (_pageAnimTimer == null) return;
+            _pageAnimTimer.Stop();
+            _pageAnimTimer.Dispose();
+            _pageAnimTimer = null;
+            if (_pageAnimNew != null) _pageAnimNew.Location = new Point(0, 0);
+            if (_pageAnimOld != null)
+            {
+                _pageAnimOld.Location = new Point(0, 0);
+                _pageAnimOld.Visible = false;
+            }
+            _pageAnimNew = null;
+            _pageAnimOld = null;
+        }
+
         public void NavigateTo(string key)
         {
             if (key == _currentKey)
@@ -458,9 +479,12 @@ namespace SysToolbox.UI
                 return;
             }
 
+            FinishPageAnim(); // 上一次切页动画未结束时先归位，避免两个 Timer 争抢页面状态
+
             NavEntry target = FindEntry(key);
             if (target == null) return;
 
+            Control oldView = null;
             for (int i = 0; i < _entries.Count; i++)
             {
                 NavEntry e = _entries[i];
@@ -468,7 +492,7 @@ namespace SysToolbox.UI
                 if (e.View != null && e.View.Visible)
                 {
                     e.View.OnDeactivated();
-                    e.View.Visible = false;
+                    if (e.View != target.View) oldView = e.View; // 旧页留到动画结束再隐藏（视差）
                 }
             }
 
@@ -478,27 +502,42 @@ namespace SysToolbox.UI
             view.BringToFront();
             view.OnActivated();
             view.ForceRefresh();
-            AnimateViewIn(view);
+            AnimateViewIn(view, oldView);
             SetStatus(target.Text);
         }
 
-        /// <summary>页面切入动画：EaseOutBack 轻回弹下滑（约 160ms），更有活力。</summary>
-        private void AnimateViewIn(Control view)
+        /// <summary>
+        /// 页面切换动画：新页 EaseOutBack 轻回弹下滑（约 160ms），
+        /// 旧页同步左移视差（约 1/3 幅度）后隐藏——方向感与层次感同时到位。
+        /// </summary>
+        private void AnimateViewIn(Control view, Control oldView)
         {
-            if (!AppSettings.Animations) return;
+            if (!AppSettings.Animations)
+            {
+                if (oldView != null) oldView.Visible = false;
+                return;
+            }
             try
             {
                 const int frames = 10;
                 const int travel = 26;
                 int step = 0;
+                _pageAnimNew = view;
+                _pageAnimOld = oldView;
                 System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
+                _pageAnimTimer = timer;
                 timer.Interval = 16;
                 timer.Tick += delegate
                 {
+                    if (_pageAnimTimer != timer) { timer.Stop(); timer.Dispose(); return; } // 已被新动画接管
                     step++;
                     if (step >= frames)
                     {
                         view.Location = new Point(0, 0);
+                        if (oldView != null && !oldView.IsDisposed) oldView.Visible = false;
+                        _pageAnimTimer = null;
+                        _pageAnimNew = null;
+                        _pageAnimOld = null;
                         timer.Stop();
                         timer.Dispose();
                         return;
@@ -509,12 +548,18 @@ namespace SysToolbox.UI
                     float c3 = c1 + 1f;
                     float ease = 1f + c3 * (float)Math.Pow(t - 1, 3) + c1 * (float)Math.Pow(t - 1, 2);
                     view.Location = new Point(0, (int)Math.Round(travel * (1f - ease)));
+                    if (oldView != null && !oldView.IsDisposed)
+                    {
+                        // 旧页视差：与进度同向左移并小幅上移，营造推入层次
+                        oldView.Location = new Point((int)Math.Round(-60f * ease), (int)Math.Round(-18f * ease));
+                    }
                 };
                 timer.Start();
             }
             catch
             {
                 view.Location = new Point(0, 0);
+                if (oldView != null) oldView.Visible = false;
             }
         }
 

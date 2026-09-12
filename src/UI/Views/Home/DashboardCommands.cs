@@ -1,7 +1,7 @@
-using System.Collections.Generic;
-using SysToolbox.UI.Commands;
+﻿using System.Collections.Generic;
+using GuyueBox.UI.Commands;
 
-namespace SysToolbox.UI.Views
+namespace GuyueBox.UI.Views
 {
     /// <summary>
     /// 系统概览页的全部命令。按钮只负责触发，操作逻辑与 owner 页面解耦：

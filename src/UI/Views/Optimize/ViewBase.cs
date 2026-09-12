@@ -1,10 +1,10 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
-using SysToolbox.UI.Commands;
+using GuyueBox.UI.Commands;
 
-namespace SysToolbox.UI.Views
+namespace GuyueBox.UI.Views
 {
     /// <summary>
     /// 所有功能页的基类：顶部标题栏（含操作按钮）+ 自绘滚动内容区。
@@ -455,16 +455,29 @@ namespace SysToolbox.UI.Views
         }
 
         /// <summary>等分一行中各控件的宽度。autoHeight 为 true 时行高取最高的子控件。
-        /// 行内含 AutoSize 控件（自然宽度的说明文字等）时跳过等分，保留各自宽度，
-        /// 避免按钮/文字被强行拉宽变形。</summary>
+        /// 行内含 AutoSize 控件（自然宽度的说明文字等）时跳过宽度等分，保留各自宽度，
+        /// 避免按钮/文字被强行拉宽变形——但行高仍按最高子控件计算，
+        /// 否则 MakeRow(0,…) 的自然宽度行会保持 0 高，整行内容不可见。</summary>
         private static void LayoutRowChildren(FlowLayoutPanel row, bool autoHeight)
         {
             int n = row.Controls.Count;
             if (n == 0) return;
 
+            bool natural = false;
             for (int i = 0; i < n; i++)
             {
-                if (row.Controls[i].AutoSize) return; // 自然宽度行：不干预
+                if (row.Controls[i].AutoSize) { natural = true; break; }
+            }
+            if (natural)
+            {
+                int tallestN = 0;
+                for (int i = 0; i < n; i++)
+                {
+                    int h = row.Controls[i].Height + row.Controls[i].Margin.Vertical;
+                    if (h > tallestN) tallestN = h;
+                }
+                if (autoHeight && tallestN > 0 && row.Height != tallestN) row.Height = tallestN;
+                return;
             }
 
             int gap = 16;

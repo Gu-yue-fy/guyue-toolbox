@@ -1,9 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 
-namespace SysToolbox.Core
+namespace GuyueBox.Core
 {
     /// <summary>
     /// 安全删除（文件粉碎）：先用随机数据覆盖指定次数，再删除，

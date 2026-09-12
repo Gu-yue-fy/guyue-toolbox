@@ -1,8 +1,8 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Text;
 
-namespace SysToolbox.Core
+namespace GuyueBox.Core
 {
     /// <summary>
     /// 外部命令执行辅助。
@@ -134,29 +134,6 @@ namespace SysToolbox.Core
             }
             catch
             {
-            }
-        }
-
-        /// <summary>用系统外壳启动程序 / 文档 / .msc 控制台（自动提权由 Verb 决定）。</summary>
-        public static bool Launch(string file)
-        {
-            return Launch(file, "");
-        }
-
-        public static bool Launch(string file, string arguments)
-        {
-            try
-            {
-                ProcessStartInfo psi = new ProcessStartInfo();
-                psi.FileName = file;
-                psi.Arguments = arguments == null ? "" : arguments;
-                psi.UseShellExecute = true;
-                Process.Start(psi);
-                return true;
-            }
-            catch
-            {
-                return false;
             }
         }
 

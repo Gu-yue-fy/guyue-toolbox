@@ -1,9 +1,9 @@
-using System;
+﻿using System;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
 
-namespace SysToolbox.Core
+namespace GuyueBox.Core
 {
     /// <summary>
     /// Win32 API 封装。仅包含工具箱实际使用到的少量调用。

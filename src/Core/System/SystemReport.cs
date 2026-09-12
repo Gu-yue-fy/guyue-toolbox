@@ -1,9 +1,9 @@
-using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
 
-namespace SysToolbox.Core
+namespace GuyueBox.Core
 {
     /// <summary>生成一份可读的本机系统报告（文本）。</summary>
     public static class SystemReport
@@ -11,7 +11,7 @@ namespace SysToolbox.Core
         public static string Build()
         {
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine("系统优化工具箱 · 系统报告");
+            sb.AppendLine("古月工具包 · 系统报告");
             sb.AppendLine("生成时间：" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
             sb.AppendLine(new string('=', 52));
 
@@ -84,7 +84,7 @@ namespace SysToolbox.Core
 
             sb.AppendLine();
             sb.AppendLine(new string('=', 52));
-            sb.AppendLine("由「系统优化工具箱」生成。本报告仅作信息汇总，不含任何敏感凭据。");
+            sb.AppendLine("由「古月工具包」生成。本报告仅作信息汇总，不含任何敏感凭据。");
 
             return sb.ToString();
         }

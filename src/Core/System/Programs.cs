@@ -1,10 +1,10 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using Microsoft.Win32;
 
-namespace SysToolbox.Core
+namespace GuyueBox.Core
 {
     /// <summary>一个已安装的程序（来自注册表 Uninstall 分支）。</summary>
     public sealed class ProgramEntry

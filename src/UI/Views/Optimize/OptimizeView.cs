@@ -1,13 +1,13 @@
-using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
-using SysToolbox.Core;
+using GuyueBox.Core;
 
-namespace SysToolbox.UI.Views
+namespace GuyueBox.UI.Views
 {
     /// <summary>分组标题：点击可折叠/展开该组。</summary>
     internal sealed class GroupHeader : Control
@@ -884,7 +884,7 @@ namespace SysToolbox.UI.Views
                     if (!hasRecent)
                     {
                         string err;
-                        hasRecent = RestorePoints.Create("SysToolbox - 启用 " + t.Name + " 前", out err);
+                        hasRecent = RestorePoints.Create("GuyueBox - 启用 " + t.Name + " 前", out err);
                         if (!hasRecent) rpNote = string.IsNullOrEmpty(err) ? "还原点创建失败" : err;
                         else rpNote = "已创建系统还原点";
                     }
@@ -950,7 +950,7 @@ namespace SysToolbox.UI.Views
 
         // ---------- 内置方案库 ----------
 
-        private const string ProfilesRoot = @"Software\SysToolbox\Profiles";
+        private const string ProfilesRoot = @"Software\GuyueBox\Profiles";
 
         private static string[] ListProfiles()
         {
@@ -1146,7 +1146,7 @@ namespace SysToolbox.UI.Views
                 if (d.ShowDialog(this) != DialogResult.OK) return;
 
                 StringBuilder sb = new StringBuilder();
-                sb.Append("{\"app\":\"SysToolbox\",\"version\":1,\"saved\":\"");
+                sb.Append("{\"app\":\"GuyueBox\",\"version\":1,\"saved\":\"");
                 sb.Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm"));
                 sb.Append("\",\"ids\":[");
                 for (int i = 0; i < ids.Count; i++)
@@ -1275,7 +1275,7 @@ namespace SysToolbox.UI.Views
                 SetSubtitle("批次含谨慎项，正在确认系统还原点…", Theme.Warning);
                 System.Threading.ThreadPool.QueueUserWorkItem(delegate
                 {
-                    string note = EnsureRecentRestorePoint("SysToolbox - 方案同步前");
+                    string note = EnsureRecentRestorePoint("GuyueBox - 方案同步前");
                     try
                     {
                         BeginInvoke((MethodInvoker)delegate

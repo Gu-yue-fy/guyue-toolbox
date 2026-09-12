@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -7,9 +7,9 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
-using SysToolbox.UI;
+using GuyueBox.UI;
 
-namespace SysToolbox.Test
+namespace GuyueBox.Test
 {
     /// <summary>
     /// 界面探针：**不显示任何窗口**，通过 DrawToBitmap 离屏渲染每个页面，
@@ -26,7 +26,7 @@ namespace SysToolbox.Test
         private static int Main(string[] args)
         {
             FullMode = args != null && args.Length > 0 && args[0] == "full";
-            string outDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "tools", "probe");
+            string outDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "probe");
             try { outDir = Path.GetFullPath(outDir); } catch { }
             if (!Directory.Exists(outDir)) Directory.CreateDirectory(outDir);
 

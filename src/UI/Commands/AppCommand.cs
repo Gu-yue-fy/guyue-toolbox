@@ -1,9 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using SysToolbox.UI.Views;
+using GuyueBox.UI.Views;
 
-namespace SysToolbox.UI.Commands
+namespace GuyueBox.UI.Commands
 {
     /// <summary>
     /// 应用命令：一个用户操作（按钮/快捷键/面板入口）的独立负责单元。

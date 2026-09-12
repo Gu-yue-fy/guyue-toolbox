@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -6,9 +6,9 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
-using SysToolbox.Core;
+using GuyueBox.Core;
 
-namespace SysToolbox.UI.Views
+namespace GuyueBox.UI.Views
 {
     public sealed class ServicesView : ViewBase
     {
@@ -463,7 +463,7 @@ namespace SysToolbox.UI.Views
             {
                 string dir = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "SysToolbox", "backups");
+                    "GuyueBox", "backups");
                 Directory.CreateDirectory(dir);
                 string path = Path.Combine(dir, "services_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".txt");
                 StringBuilder sb = new StringBuilder();
@@ -504,7 +504,7 @@ namespace SysToolbox.UI.Views
             {
                 string dir = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "SysToolbox", "backups");
+                    "GuyueBox", "backups");
                 if (!Directory.Exists(dir)) { _lastBackup = null; return; }
                 string[] files = Directory.GetFiles(dir, "services_*.txt");
                 if (files.Length == 0) { _lastBackup = null; return; }

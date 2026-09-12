@@ -1,8 +1,8 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
-namespace SysToolbox.Core
+namespace GuyueBox.Core
 {
     /// <summary>一个 Windows 服务。</summary>
     public sealed class ServiceInfo

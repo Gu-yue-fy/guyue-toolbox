@@ -1,8 +1,8 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Management;
 
-namespace SysToolbox.Core
+namespace GuyueBox.Core
 {
     /// <summary>一个系统还原点。</summary>
     public sealed class RestorePoint

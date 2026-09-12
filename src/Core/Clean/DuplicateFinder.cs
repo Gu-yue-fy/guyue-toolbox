@@ -1,11 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace SysToolbox.Core
+namespace GuyueBox.Core
 {
     /// <summary>一组内容相同的重复文件。</summary>
     public sealed class DuplicateGroup

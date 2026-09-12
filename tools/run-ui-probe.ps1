@@ -1,4 +1,4 @@
-<#
+﻿<#
     Build and run the UI probe: shows the real window, screenshots every page,
     and captures unhandled exceptions. Development-only, changes nothing on the system.
 #>
@@ -34,7 +34,7 @@ $a += '/target:exe'
 $a += '/platform:anycpu'
 $a += '/langversion:5'
 $a += '/codepage:65001'
-$a += '/main:SysToolbox.Test.UiProbe'
+$a += '/main:GuyueBox.Test.UiProbe'
 $a += ('/out:' + $q + $out + $q)
 $a += $refs
 foreach ($s in $sources) { $a += ($q + $s + $q) }

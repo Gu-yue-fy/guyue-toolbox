@@ -24,9 +24,9 @@ Write-Host '=== 3/3 UI 探针（快速） ===' -ForegroundColor Cyan
 & (Join-Path $root 'tools\run-ui-probe.ps1')
 if ($LASTEXITCODE -ne 0) { Write-Host '探针异常，终止。' -ForegroundColor Red; exit 1 }
 
-Get-Process -Name SysToolbox -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process -Name GuyueBox -ErrorAction SilentlyContinue | Stop-Process -Force
 if (-not $NoStart) {
-    Start-Process -FilePath (Join-Path $root 'bin\SysToolbox.exe')
+    Start-Process -FilePath (Join-Path $root 'bin\GuyueBox.exe')
     Write-Host ''
-    Write-Host '已启动 SysToolbox.exe' -ForegroundColor Green
+    Write-Host '已启动 GuyueBox.exe' -ForegroundColor Green
 }

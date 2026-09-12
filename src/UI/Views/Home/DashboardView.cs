@@ -1,12 +1,12 @@
-﻿using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
-using SysToolbox.Core;
+using GuyueBox.Core;
 
-namespace SysToolbox.UI.Views
+namespace GuyueBox.UI.Views
 {
     public sealed class DashboardView : ViewBase
     {
@@ -33,7 +33,9 @@ namespace SysToolbox.UI.Views
         private bool _exporting;
 
         public DashboardView()
-            : base("系统概览", "第一次用？点右下「一键优化」一步到位；所有优化都能在「优化中心」随时还原")
+            : base("系统概览", AppSettings.FirstRun
+                ? "第一次用？点右上「一键体检」查看系统健康；每项优化都能在「优化中心」随时还原"
+                : "系统健康总览：体检得分 · 资源占用 · 优化建议")
         {
             _cpuCard.IconKind = "cpu";
             _cpuCard.AccentColor = Theme.Accent;
@@ -52,9 +54,19 @@ namespace SysToolbox.UI.Views
             _diskInfo.IconKind = "disk";
             _diskInfo.CaptionColor = Theme.Success;
 
-            _notice.NoticeIcon = "admin";
-            _notice.NoticeAccent = Theme.Warning;
-            _notice.NoticeText = "当前以普通权限运行，部分优化与清理功能需要管理员权限。";
+            // 权限提示按实际情况显示——管理员下不再误报"普通权限"
+            if (Native.IsElevated())
+            {
+                _notice.NoticeIcon = "shield";
+                _notice.NoticeAccent = Theme.Success;
+                _notice.NoticeText = "已以管理员身份运行，全部功能可用。所有优化在「优化中心」随时可还原。";
+            }
+            else
+            {
+                _notice.NoticeIcon = "admin";
+                _notice.NoticeAccent = Theme.Warning;
+                _notice.NoticeText = "当前以普通权限运行，部分优化与清理功能需要管理员权限。";
+            }
 
             // 按钮只负责触发；操作定义与归口见 DashboardCommands（命令号 dashboard.*）
             DashboardCommands.RegisterAll(this);
@@ -86,6 +98,7 @@ namespace SysToolbox.UI.Views
         public override void OnDeactivated()
         {
             _timer.Stop();
+            if (AppSettings.FirstRun) AppSettings.MarkFirstRunDone(); // 用户已离开首页：引导使命完成
         }
 
         public override bool IsBusy
@@ -188,14 +201,19 @@ namespace SysToolbox.UI.Views
             infoRow.Controls.Add(_diskInfo);
             AddRow(infoRow);
 
-            _sysInfo.Height = 320;
-            _diskInfo.Height = 320;
+            // 底部弹性 spacer：内容不足视口时吸收余量（卡片保持内容准高，永不裁切）
+            _bottomSpacer.BackColor = Theme.WindowBg;
+            _bottomSpacer.Margin = new Padding(0);
+            _bottomSpacer.Tag = "stretch";
+            _bottomSpacer.Height = 0;
+            Body.Controls.Add(_bottomSpacer);
 
             Body.Resize += delegate { SyncInfoHeights(); };
             SyncInfoHeights();
         }
 
         private bool _syncingHeights;
+        private readonly Panel _bottomSpacer = new Panel();
 
         private void SyncInfoHeights()
         {
@@ -203,6 +221,8 @@ namespace SysToolbox.UI.Views
             _syncingHeights = true;
             try
             {
+                // 卡片高 = 内容准高（PreferredHeight），内容永不裁切；
+                // 底部余量交给弹性 spacer 吸收（空 panel，视觉干净且不与内容争高度）
                 int infoHeight = Math.Max(200, _sysInfo.PreferredHeight);
                 int diskHeight = Math.Max(200, _diskInfo.PreferredHeight);
                 if (_sysInfo.Height != infoHeight) _sysInfo.Height = infoHeight;
@@ -211,21 +231,11 @@ namespace SysToolbox.UI.Views
                 LayoutRows();
                 RefreshLayout();
 
-                // 内容不满视口时把两张大卡拉高吸收余量——底部不再悬空一块
                 int contentBottom = Math.Max(_sysInfo.Bottom, _diskInfo.Bottom) + Body.Padding.Bottom;
                 int slack = ViewportHeight - contentBottom;
-                if (slack > 8)
-                {
-                    // 两卡同行（行高取最高卡）：每卡加满 slack 才能正好填满视口
-                    int extra = Math.Min(slack, 400);
-                    if (extra > 0)
-                    {
-                        _sysInfo.Height = _sysInfo.Height + extra;
-                        _diskInfo.Height = _diskInfo.Height + extra;
-                        LayoutRows();
-                        RefreshLayout();
-                    }
-                }
+                int spacerH = slack > 0 ? slack : 0;
+                if (_bottomSpacer.Height != spacerH) _bottomSpacer.Height = spacerH;
+                _bottomSpacer.Visible = spacerH > 0;
             }
             finally
             {
@@ -312,10 +322,13 @@ namespace SysToolbox.UI.Views
             SystemSnapshot s = _snapshot;
             if (s == null) return;
 
-            SetSubtitle(s.ComputerName + " · " + s.OsName + " · " + s.UserName,
-                s.Elevated ? Theme.Success : Theme.Warning);
-
-            _notice.Visible = !s.Elevated;
+            // 首次运行时保留新手指引文案；权限提示条已按实际权限条件化，始终显示
+            if (!AppSettings.FirstRun)
+            {
+                SetSubtitle(s.ComputerName + " · " + s.OsName + " · " + s.UserName,
+                    s.Elevated ? Theme.Success : Theme.Warning);
+            }
+            _notice.Visible = true;
 
             _cpuCard.CaptionText = "CPU 使用率";
             _cpuCard.MetricText = s.CpuLoadPercent >= 0 ? s.CpuLoadPercent.ToString("0") + " %" : "--";
@@ -531,8 +544,11 @@ namespace SysToolbox.UI.Views
                         ApplyScore(finalScore, issueCount);
 
                         string title = "体检完成，得分 " + finalScore + " 分";
-                        SetSubtitle(title + "，共 " + issueCount + " 项建议处理。",
+                        SetSubtitle(issueCount > 0
+                            ? title + "，共 " + issueCount + " 项建议——清理与启动项可到「清理与磁盘」处理。"
+                            : title + "，系统状态良好。",
                             issueCount > 0 ? Theme.Warning : Theme.Success);
+                        AppSettings.MarkFirstRunDone();
 
                         if (issueCount > 0)
                         {

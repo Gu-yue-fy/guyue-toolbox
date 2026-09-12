@@ -1,12 +1,12 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Management;
 using System.Threading;
 using System.Windows.Forms;
-using SysToolbox.Core;
+using GuyueBox.Core;
 
-namespace SysToolbox.UI.Views
+namespace GuyueBox.UI.Views
 {
     /// <summary>磁盘健康：SMART 状态、介质类型与温度（WMI MSFT_PhysicalDisk）。</summary>
     public sealed class DiskHealthView : ViewBase

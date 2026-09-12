@@ -1,8 +1,8 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
-using SysToolbox.UI.Views;
+using GuyueBox.UI.Views;
 
-namespace SysToolbox.UI
+namespace GuyueBox.UI
 {
     /// <summary>
     /// 页面模块：功能页的自描述注册单元。
@@ -62,15 +62,16 @@ namespace SysToolbox.UI
             Module("系统管理", "services", "系统配置", "services", delegate
             {
                 return new TabbedView("系统配置",
-                    "服务 / 计划任务 / 启动项 / 右键菜单 / 设备 / 系统还原点，系统内容集中管理",
-                    new string[] { "服务管理", "计划任务", "启动项管理", "右键菜单", "设备管理", "系统还原点" },
+                    "服务 / 计划任务 / 启动项 / 右键菜单 / 设备 / 还原点 / 系统维护，系统内容集中管理",
+                    new string[] { "服务管理", "计划任务", "启动项管理", "右键菜单", "设备管理", "系统还原点", "系统维护" },
                     new Func<ViewBase>[] {
                         delegate { return new ServicesView(); },
                         delegate { return new ScheduledTasksView(); },
                         delegate { return new StartupView(); },
                         delegate { return new ContextMenuView(); },
                         delegate { return new DeviceView(); },
-                        delegate { return new RestoreView(); }
+                        delegate { return new RestoreView(); },
+                        delegate { return new MaintenanceView(); }
                     });
             }),
             Module("系统管理", "process", "进程管理", "process", delegate { return new ProcessView(); }),

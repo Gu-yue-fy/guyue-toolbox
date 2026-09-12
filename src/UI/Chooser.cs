@@ -1,9 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 
-namespace SysToolbox.UI
+namespace GuyueBox.UI
 {
     /// <summary>主题化的「多选一」对话框，替代原生下拉与 MessageBox。</summary>
     public static class Chooser

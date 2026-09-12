@@ -1,10 +1,10 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
-using SysToolbox.Core;
+using GuyueBox.Core;
 
-namespace SysToolbox.UI.Views
+namespace GuyueBox.UI.Views
 {
     /// <summary>
     /// 合并页容器（主从式）：左侧竖排分类导航 + 右侧全高内容区。
@@ -38,11 +38,9 @@ namespace SysToolbox.UI.Views
             _master.Tag = "stretch";
             _master.Margin = new Padding(0);
 
-            // 左侧分类导航
+            // 左侧分类导航（手动布局：不用 Dock，规避停靠顺序坑）
             _navPanel = new Panel();
             _navPanel.BackColor = Theme.ChromeBg;
-            _navPanel.Dock = DockStyle.Left;
-            _navPanel.Width = NavWidth;
             _navPanel.Paint += delegate (object s, PaintEventArgs e)
             {
                 using (Pen p = new Pen(Theme.BorderSoft))
@@ -62,14 +60,12 @@ namespace SysToolbox.UI.Views
                 _navItems.Add(item);
             }
 
-            // 右侧内容区（注意：WinForms 停靠按加入顺序逆序布局，
-            // Fill 必须先于 Left 加入，否则左导航会被占满全宽的内容区挤成 0 宽）
+            // 右侧内容区（手动布局）
             _host = new Panel();
             _host.BackColor = Theme.WindowBg;
-            _host.Dock = DockStyle.Fill;
             _master.Controls.Add(_host);
-            _host.BringToFront();
-            _navPanel.BringToFront();
+
+            _master.Resize += delegate { LayoutMaster(); };
 
             AddFull(_master, 600, 0);
             Body.Resize += delegate
@@ -79,6 +75,14 @@ namespace SysToolbox.UI.Views
             };
 
             SwitchTo(0);
+        }
+
+        /// <summary>主容器手动布局：左导航固定宽满高，内容区占剩余全部。</summary>
+        private void LayoutMaster()
+        {
+            int h = Math.Max(1, _master.Height);
+            _navPanel.SetBounds(0, 0, NavWidth, h);
+            _host.SetBounds(NavWidth, 0, Math.Max(1, _master.Width - NavWidth), h);
         }
 
         private void SwitchTo(int idx)

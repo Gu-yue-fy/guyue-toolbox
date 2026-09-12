@@ -1,4 +1,4 @@
-<#
+﻿<#
     System Optimization Toolbox - build script
     Uses the C# compiler shipped with .NET Framework (csc.exe).
     No .NET SDK required.
@@ -16,7 +16,7 @@ $ErrorActionPreference = 'Stop'
 $root     = $PSScriptRoot
 $srcDir   = Join-Path $root 'src'
 $binDir   = Join-Path $root 'bin'
-$outFile  = Join-Path $binDir 'SysToolbox.exe'
+$outFile  = Join-Path $binDir 'GuyueBox.exe'
 $manifest = Join-Path $srcDir 'app.manifest'
 
 Write-Host ''

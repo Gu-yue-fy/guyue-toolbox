@@ -1,11 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Threading;
 using System.Windows.Forms;
-using SysToolbox.Core;
+using GuyueBox.Core;
 
-namespace SysToolbox.UI.Views
+namespace GuyueBox.UI.Views
 {
     public sealed class ProgramsView : ViewBase
     {
@@ -18,6 +18,9 @@ namespace SysToolbox.UI.Views
         private readonly ComboBox _sort = new ComboBox();
         private readonly CheckBox _incUpdates = new CheckBox();
         private readonly Label _countLabel = new Label();
+        private readonly ComboBox _wingetBox = new ComboBox();
+        private readonly TextBox _wingetId = new TextBox();
+        private AccentButton _wingetInstall;
 
         private readonly List<ProgramEntry> _all = new List<ProgramEntry>();
         private bool _busy;
@@ -138,12 +141,126 @@ namespace SysToolbox.UI.Views
             row.Controls.Add(_summary);
             AddRow(row);
 
-            AddFull(_toolbar, 34, 18);
+            AddFull(_toolbar, 34, 12);
+
+            // Winget 一键安装（系统包管理器，Win10 1809+ 自带）
+            FlowLayoutPanel wingetRow = MakeRow(0, 12);
+            Label wl = new Label();
+            wl.Text = "安装软件：";
+            wl.ForeColor = Theme.TextPrimary;
+            wl.Font = Theme.FontBodyBold;
+            wl.Size = new Size(90, 30);
+            wl.Margin = new Padding(0, 0, 8, 0);
+            wingetRow.Controls.Add(wl);
+            _wingetBox.DropDownStyle = ComboBoxStyle.DropDownList;
+            _wingetBox.Size = new Size(240, 30);
+            for (int i = 0; i < WingetApps.Length; i++) _wingetBox.Items.Add(WingetApps[i].Name);
+            if (_wingetBox.Items.Count > 0) _wingetBox.SelectedIndex = 0;
+            wingetRow.Controls.Add(_wingetBox);
+            _wingetInstall = MakeInlineWingetButton("安装选中", OnWingetInstall, 110);
+            wingetRow.Controls.Add(_wingetInstall);
+            _wingetId.BorderStyle = BorderStyle.FixedSingle;
+            _wingetId.Font = Theme.FontBody;
+            _wingetId.Size = new Size(170, 30);
+            wingetRow.Controls.Add(_wingetId);
+            AccentButton custom = MakeInlineWingetButton("安装自定义", OnWingetCustom, 124);
+            wingetRow.Controls.Add(custom);
+            Label tip = new Label();
+            tip.Text = "静默安装，进度见页头提示";
+            tip.ForeColor = Theme.TextMuted;
+            tip.Font = Theme.FontSmall;
+            tip.Size = new Size(190, 30);
+            tip.Margin = new Padding(12, 8, 0, 0);
+            wingetRow.Controls.Add(tip);
+            AddRow(wingetRow);
+
             AddFull(_grid, 320, 0);
 
             Body.Resize += delegate { Relayout(); };
             Relayout();
             UpdateActions();
+        }
+
+        private static readonly WingetApp[] WingetApps = new WingetApp[]
+        {
+            new WingetApp("Google Chrome 浏览器", "Google.Chrome"),
+            new WingetApp("Mozilla Firefox 浏览器", "Mozilla.Firefox"),
+            new WingetApp("7-Zip 压缩工具", "7zip.7zip"),
+            new WingetApp("VLC 媒体播放器", "VideoLAN.VLC"),
+            new WingetApp("VS Code 编辑器", "Microsoft.VisualStudioCode"),
+            new WingetApp("Notepad++ 编辑器", "Notepad++.Notepad++"),
+            new WingetApp("PotPlayer 播放器", "PotPlayer.PotPlayer")
+        };
+
+        private sealed class WingetApp
+        {
+            public readonly string Name;
+            public readonly string Id;
+            public WingetApp(string name, string id) { Name = name; Id = id; }
+        }
+
+        private void OnWingetInstall(object sender, EventArgs e)
+        {
+            if (_wingetBox.SelectedIndex < 0) return;
+            WingetInstall(WingetApps[_wingetBox.SelectedIndex].Name, WingetApps[_wingetBox.SelectedIndex].Id);
+        }
+
+        private void OnWingetCustom(object sender, EventArgs e)
+        {
+            string id = _wingetId.Text.Trim();
+            if (id.Length == 0)
+            {
+                Dialog.Info(this, "未输入", "请输入要安装的 winget 包 ID（如 VideoLAN.VLC）。");
+                return;
+            }
+            WingetInstall(id, id);
+        }
+
+        private void WingetInstall(string title, string id)
+        {
+            if (_busy) return;
+            if (!Dialog.Confirm(this, "安装软件",
+                "将通过 Winget 静默安装：\r\n\r\n  " + title + "（" + id + "）\r\n\r\n" +
+                "安装需要联网下载，耗时取决于网速。是否继续？")) return;
+
+            _busy = true;
+            _wingetInstall.Enabled = false;
+            SetSubtitle("正在通过 Winget 安装 " + title + " …（可能需要数分钟）", Theme.Warning);
+
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                Shell.Result r = Shell.Run("winget",
+                    "install --id " + id + " -e --silent --accept-source-agreements --accept-package-agreements",
+                    900000);
+                Post(delegate
+                {
+                    _busy = false;
+                    _wingetInstall.Enabled = true;
+                    bool ok = r.Ok && r.All.IndexOf("0x8", StringComparison.Ordinal) < 0;
+                    if (ok)
+                    {
+                        SetSubtitle(title + " 安装完成。", Theme.Success);
+                        Load(false); // 刷新已安装列表
+                    }
+                    else
+                    {
+                        Dialog.Output(this, "安装输出", string.IsNullOrEmpty(r.All) ? "winget 执行失败（未安装或网络错误）。" : r.All);
+                        SetSubtitle(title + " 安装未成功，详见输出。", Theme.Danger);
+                    }
+                });
+            });
+        }
+
+        private AccentButton MakeInlineWingetButton(string text, EventHandler onClick, int width)
+        {
+            AccentButton b = new AccentButton();
+            b.Text = text;
+            b.IconKind = "apps";
+            b.Variant = ButtonVariant.Primary;
+            b.Size = new Size(width, 30);
+            b.Margin = new Padding(6, 0, 8, 0);
+            b.Click += onClick;
+            return b;
         }
 
         private void Relayout()

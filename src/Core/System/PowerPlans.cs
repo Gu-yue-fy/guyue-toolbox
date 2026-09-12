@@ -1,9 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace SysToolbox.Core
+namespace GuyueBox.Core
 {
     public sealed class PowerPlan
     {

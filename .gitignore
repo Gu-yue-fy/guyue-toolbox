@@ -2,14 +2,14 @@
 bin/
 obj/
 
-# 探针输出
-tools/probe/
+# 探针截图（运行时产物）
+bin/probe/
+
+# 运行时生成的临时文件
+*.tmp
+*.log
 tools/_dump*.txt
 tools/_fullprobe.txt
 tools/_uilint*.txt
 tools/_audit.txt
 tools/_tweak*.txt
-
-# 运行时生成的临时文件
-*.tmp
-*.log

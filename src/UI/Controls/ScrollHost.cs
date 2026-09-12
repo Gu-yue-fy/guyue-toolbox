@@ -1,9 +1,9 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
-namespace SysToolbox.UI
+namespace GuyueBox.UI
 {
     /// <summary>
     /// 自绘滚动容器：用一条细长的深色滚动条替代系统原生的 Win32 滚动条，
@@ -11,7 +11,7 @@ namespace SysToolbox.UI
     /// </summary>
     public class ScrollHost : BufferPanel
     {
-        private const int BarWidth = 6;
+        private const int BarWidth = 8;
         private const int BarInset = 3;
         private const int MinThumb = 36;
 
@@ -325,7 +325,7 @@ namespace SysToolbox.UI
 
             Color thumbColor = _dragging
                 ? Theme.Accent
-                : (_hoverBar ? Theme.BorderStrong : Gfx.Alpha(Theme.BorderStrong, 150));
+                : (_hoverBar ? Theme.Accent : Gfx.Alpha(Theme.BorderStrong, 210));
 
             Gfx.FillRound(g, new Rectangle(x, _thumbTop, BarWidth, _thumbSize),
                 BarWidth / 2, thumbColor);

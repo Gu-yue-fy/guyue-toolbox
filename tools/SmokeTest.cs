@@ -1,14 +1,14 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Windows.Forms;
-using SysToolbox.Core;
-using SysToolbox.UI;
-using SysToolbox.UI.Views;
+using GuyueBox.Core;
+using GuyueBox.UI;
+using GuyueBox.UI.Views;
 
-namespace SysToolbox.Test
+namespace GuyueBox.Test
 {
     /// <summary>
     /// 控制台冒烟测试：只做只读操作，用来验证核心逻辑与界面构造不会抛异常。
@@ -25,7 +25,7 @@ namespace SysToolbox.Test
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
-            Console.WriteLine("==== 系统优化工具箱 · 冒烟测试 ====");
+            Console.WriteLine("==== 古月工具包 · 冒烟测试 ====");
             Console.WriteLine();
 
             TestCore();
@@ -109,7 +109,7 @@ namespace SysToolbox.Test
 
             Run("重复文件查找", delegate
             {
-                string dir = Path.Combine(Path.GetTempPath(), "SysToolboxDup_" + Guid.NewGuid().ToString("N"));
+                string dir = Path.Combine(Path.GetTempPath(), "GuyueBoxDup_" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(dir);
                 try
                 {
@@ -141,7 +141,7 @@ namespace SysToolbox.Test
 
             Run("右键菜单", delegate
             {
-                List<ContextEntry> list = SysToolbox.Core.ContextMenu.List();
+                List<ContextEntry> list = GuyueBox.Core.ContextMenu.List();
                 Assert(list != null, "右键菜单列表返回空引用。");
                 Console.WriteLine("      读取到 " + list.Count + " 个右键菜单项。");
             });
@@ -259,19 +259,6 @@ namespace SysToolbox.Test
                 Assert(userTemp.Scanned, "临时目录扫描未完成。");
                 Console.WriteLine("      用户临时文件：" + userTemp.FileCount + " 个文件，" +
                     userTemp.SizeText + "，耗时 " + sw.ElapsedMilliseconds + " ms");
-            });
-
-            Run("查找大文件（只读，限定小范围）", delegate
-            {
-                string dir = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-                if (!System.IO.Directory.Exists(dir))
-                {
-                    Console.WriteLine("      （跳过：文档目录不存在）");
-                    return;
-                }
-                CancellationTokenSource cts = new CancellationTokenSource(4000);
-                List<JunkScanner.BigFile> files = JunkScanner.FindLargeFiles(dir, 5, cts.Token);
-                Console.WriteLine("      文档目录中 >=50MB 的文件：" + files.Count + " 个");
             });
         }
 
@@ -447,18 +434,18 @@ namespace SysToolbox.Test
                 // BeginBackup 为保留式：不删除已有备份组（防重复 Apply / 共享组污染原值）。
                 // 因此先显式清理本次冒烟残留，再验证完整备份→写入→还原闭环。
                 try { Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(
-                    @"Software\SysToolbox\Backup\" + testId, false); } catch { }
+                    @"Software\GuyueBox\Backup\" + testId, false); } catch { }
                 RegHelper.BeginBackup(testId);
                 Assert(!RegHelper.HasBackup(testId), "清理后 BeginBackup 不应留下记录。");
                 RegHelper.SetValue(Microsoft.Win32.RegistryHive.CurrentUser,
-                    @"Software\SysToolbox\__smoketest__", "probe", 123, Microsoft.Win32.RegistryValueKind.DWord, testId);
+                    @"Software\GuyueBox\__smoketest__", "probe", 123, Microsoft.Win32.RegistryValueKind.DWord, testId);
                 Assert(RegHelper.HasBackup(testId), "写入后备份记录应存在。");
                 int v = RegHelper.GetInt(Microsoft.Win32.RegistryHive.CurrentUser,
-                    @"Software\SysToolbox\__smoketest__", "probe", 0);
+                    @"Software\GuyueBox\__smoketest__", "probe", 0);
                 Assert(v == 123, "读取刚写入的值失败：" + v);
                 Assert(RegHelper.Restore(testId), "还原失败。");
                 object after = RegHelper.GetValue(Microsoft.Win32.RegistryHive.CurrentUser,
-                    @"Software\SysToolbox\__smoketest__", "probe");
+                    @"Software\GuyueBox\__smoketest__", "probe");
                 Assert(after == null, "还原后值应被删除，实际为：" + after);
             });
 
