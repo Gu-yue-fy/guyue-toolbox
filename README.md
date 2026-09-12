@@ -1,41 +1,90 @@
-# 古月工具箱 GuyueBox（工具包仓库）
+﻿# 系统优化工具箱（SysToolbox）
 
-本仓库用于**发布软件本体**：存放 C# / WinForms 源码、自动更新代码，并通过 **GitHub Releases** 分发安装包。
+一个面向 Windows 的原生系统优化工具，使用 **C# / WinForms（.NET Framework 4.x）** 编写。
+**不需要安装任何 SDK**——直接用系统自带的 `csc.exe` 编译，单个 exe 即可运行。
 
-> 官网与版本清单另设独立仓库 `guyue-toolbox-site`（GitHub Pages）。两个仓库职责分离：
-> - **本仓库（guyue-toolbox）**：软件源码 + Releases 安装包
-> - **官网仓库（guyue-toolbox-site）**：静态站点 + `update.json` 版本清单
+- 深色主题、全自绘 UI（无图片 / 图标字体资源）
+- 每一项优化**自动备份原值、可独立还原**
+- 硬件感知：N 卡 / A 卡 / Intel、Intel / AMD CPU 的专属优化自动适配，不适用的项自动失效
+- 完全免费开源，无激活、无功能限制
 
-## 目录内容
+---
+
+## 编译与运行
+
+```powershell
+# 一键编译（使用系统 csc.exe，无需 SDK）
+powershell -ExecutionPolicy Bypass -File .\build.ps1
+
+# 一键验证：编译 + 34 项冒烟测试 + 全页面 UI 探针
+powershell -ExecutionPolicy Bypass -File .\tools\verify.ps1
+```
+
+产物：`bin\SysToolbox.exe`（绿色单文件，建议以管理员身份运行以解锁全部功能）。
+
+## 功能结构（6 组 · 13 页）
+
+| 分组 | 页面 |
+| --- | --- |
+| **首页** | 系统概览（实时资源统计 · 一键体检评分 · 0.5ms 高精度计时器 · 硬件信息 · 导出报告） |
+| **一键提速** | 优化中心（170+ 项） · 电源计划（硬件感知推荐） |
+| **清理与磁盘** | 清理与磁盘（垃圾清理 / 隐私清理 / 文件粉碎 / 空间分析 / 重复文件 / 磁盘健康 SMART，六合一） |
+| **系统配置** | 系统配置（服务 / 计划任务 / 启动项 / 右键菜单 / 可选功能 / 设备管理，六合一） · 环境变量 · 进程管理（优先级 / 核心绑定） · 已安装程序 |
+| **网络与维护** | 网络中心（诊断 / DNS 切换 / 端口占用 / 网络栈修复，一体化） · 系统还原点 |
+| **性能与授权** | 性能基准（9 项测试 + 排行榜） · 软件设置 · 关于与更新 |
+
+## 优化中心（170+ 项）
+
+开关式注册表 / 服务优化，覆盖八类：
+
+| 类别 | 数量 | 说明 |
+| --- | --- | --- |
+| 游戏优化 | 70 | MMCSS 调度、DWM 呈现、输入链路、USB/网卡省电、内核低延迟、DSCP QoS、MSI 中断、磁盘 LPM 等 |
+| 系统服务 | 26 | 遥测 / 索引 / Xbox / 智能卡等，含推荐禁用清单 |
+| 性能优化 | 16 | NTFS 加速、Svchost 合并、保留存储、更新策略 |
+| 网络优化 | 12 | EEE/RSC/ECN、TCP 启发式、Nagle、BBRv2、IPv6 |
+| 隐私与安全 | 9 | 遥测、广告 ID、Copilot、Recall AI 等 |
+| 系统精简 | 10 | 推送内容、传递优化、错误报告、开始菜单推荐区 |
+| 外观与体验 | 6 | 扩展名显示、经典右键、任务栏偏好 |
+| 极限性能 | 若干 | 关闭内核缓解 / Defender 等（谨慎项，仅推荐专用游戏机使用） |
+
+安全机制：
+- 每项修改前自动备份注册表原值，**关闭开关即还原**
+- 谨慎项（Risky）应用前二次确认
+- 厂商专属项（N 卡 / A 卡 / Intel）在无关硬件上**自动判定不适用**，拒绝写入无效键
+- 方案库：保存当前优化组合为方案、一键应用/同步、导出导入
+
+## 架构
 
 ```
-guyue-toolbox/
-├─ UpdateChecker.cs      # 自动更新核心类（C#，读取官网仓库的 update.json）
-├─ UpdateExample.cs      # 调用示例（C#，含 WinForms 集成片段）
-├─ （你的软件源码）        # 把 C:\Users\Administrator\CodeBuddy\系统优化工具箱 里的工程复制进来
-├─ LICENSE              # MIT
-└─ .gitignore           # 含 C# / Visual Studio 忽略规则
+入口 Program.cs（单实例 / 全局异常兜底 / 提权声明）
+  └─ UI   页面目录 PageCatalog（数据驱动加页）
+          命令层 CommandHub（每个操作一个命令，统一执行与异常兜底）
+          自绘控件库（DarkGrid / ScrollHost / 主题 / 图标绘制）
+  └─ Core 五大业务域
+          Optimize（优化项库，ITweakProvider 可扩展）
+          Clean（垃圾 / 隐私 / 粉碎 / 重复 / 空间）
+          Net（诊断 / DNS / 端口）
+          System（服务 / 进程 / 设备 / 启动项 / 还原点 / 系统信息）
+          Tool（性能基准）
+  └─ Infra 基础设施
+          RegHelper（备份-写入-还原闭环）
+          Shell（命令执行，控制台编码自适应）
+          UpdateChecker（GitHub Releases 更新）
 ```
 
-`UpdateChecker.cs` 中的清单地址已指向官网仓库：
-`https://Gu-yue-fy.github.io/guyue-toolbox-site/update.json`
+工具链（`tools/`）：`verify.ps1` 一键验证、`run-ui-probe.ps1` 全页面探针（截图 / 布局体检 / 绘制基准）、`make-release.ps1` 发版打包。
 
-## 如何发新版本
+## 更新机制
 
-1. 在本仓库编译生成安装包 `古月工具箱_setup.exe`；
-2. 在 GitHub 本仓库 **Releases** 中发布，上传该安装包（建议带 `v1.x.x` 标签）；
-3. 打开官网仓库 `guyue-toolbox-site`，修改 `update.json` 的 `version` / `date` / `assets.win` 直链，提交推送；
-   GitHub Pages 会自动重新构建，官网版本号与软件内更新提示同步生效。
+采用 GitHub Releases 发布：
 
-## 本地初始化（首次）
+1. 打 tag（如 `v1.0.1`）建 Release，上传 exe 作为 asset
+2. 更新 `update.json`（version / url / sha256 / notes）提交到仓库
+3. 老版本用户在「关于与更新」一键检查、下载（自动 SHA256 校验）、静默替换重启
 
-```bash
-cd toolkit
-git init
-git add .
-git commit -m "init toolkit"
-git branch -M main
-git remote add origin https://github.com/Gu-yue-fy/guyue-toolbox.git
-git push -u origin main
-# 然后在 GitHub 网页上传第一个 Release 安装包
-```
+---
+
+## License
+
+MIT——自由使用、修改与分发。
