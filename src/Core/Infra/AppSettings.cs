@@ -1,4 +1,9 @@
-﻿﻿using System;
+﻿/* ============================================================
+ * 文件说明：用户设置（注册表持久化）：主题色、动画、更新检查、窗口尺寸、提示条关闭记忆等。
+ * 项目：古月工具包（GuyueBox）
+ * ============================================================ */
+
+﻿using System;
 using System.Drawing;
 using Microsoft.Win32;
 
@@ -49,6 +54,46 @@ namespace GuyueBox.Core
                 _autoUpdateCheck = value;
                 Save("AutoUpdateCheck", value ? 1 : 0);
             }
+        }
+
+        // ---------------- 提示条关闭记忆 ----------------
+
+        private static string _hiddenNotices;
+
+        /// <summary>读取某页提示条是否被用户关闭过（key = 页面类名）。关闭过的提示不再出现，避免反复挡视野。</summary>
+        public static bool IsNoticeDismissed(string pageId)
+        {
+            if (string.IsNullOrEmpty(pageId)) return false;
+            EnsureNoticesLoaded();
+            return (_hiddenNotices + ";").IndexOf(";" + pageId + ";", StringComparison.Ordinal) >= 0;
+        }
+
+        /// <summary>记录用户关闭了某页的提示条（持久化，永久生效）。</summary>
+        public static void MarkNoticeDismissed(string pageId)
+        {
+            if (string.IsNullOrEmpty(pageId) || IsNoticeDismissed(pageId)) return;
+            _hiddenNotices = string.IsNullOrEmpty(_hiddenNotices) ? pageId : _hiddenNotices + ";" + pageId;
+            try
+            {
+                using (RegistryKey k = Registry.CurrentUser.CreateSubKey(KeyPath))
+                {
+                    if (k != null) k.SetValue("HiddenNotices", _hiddenNotices, RegistryValueKind.String);
+                }
+            }
+            catch { }
+        }
+
+        private static void EnsureNoticesLoaded()
+        {
+            if (_hiddenNotices != null) return;
+            try
+            {
+                using (RegistryKey k = Registry.CurrentUser.OpenSubKey(KeyPath))
+                {
+                    _hiddenNotices = (k == null ? null : (k.GetValue("HiddenNotices") as string)) ?? "";
+                }
+            }
+            catch { _hiddenNotices = ""; }
         }
 
         // ---------------- 窗口尺寸 / 位置持久化 ----------------

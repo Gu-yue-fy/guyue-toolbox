@@ -339,12 +339,14 @@ namespace GuyueBox.Core
                 const int fileMB = 32;
                 const int blockSize = 4096;
                 byte[] block = new byte[blockSize];
+                long blocks = (long)fileMB * 1024 * 1024 / blockSize;
                 using (FileStream w = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
                 {
-                    for (int i = 0; i < fileMB; i++) w.Write(block, 0, blockSize);
+                    // 必须写满 32MB：否则随机读 99.6% 落在 EOF 外，IOPS 严重失真
+                    for (long i = 0; i < blocks; i++) w.Write(block, 0, blockSize);
+                    w.Flush();
                 }
 
-                long blocks = (long)fileMB * 1024 * 1024 / blockSize;
                 Random rnd = new Random(12345);
                 int ops = 0;
                 long sum = 0;

@@ -1,4 +1,9 @@
-﻿using System;
+﻿/* ============================================================
+ * 文件说明：程序入口：单实例互斥锁、全局异常捕获、DPI/清单初始化，启动 MainForm 消息循环。
+ * 项目：古月工具包（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Threading;
 using System.Windows.Forms;
 using GuyueBox.Core;

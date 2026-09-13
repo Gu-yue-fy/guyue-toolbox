@@ -1,4 +1,9 @@
-﻿using System;
+﻿/* ============================================================
+ * 文件说明：滚动容器：自绘滚动条 + 内容高度自适应，承担所有页面的内容滚动。
+ * 项目：古月工具包（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -87,6 +92,9 @@ namespace GuyueBox.UI
             if (_content != null)
             {
                 _content.Location = new Point(0, 0);
+                // 换内容时重置滚动目标：旧 _targetOffset 可能远超新内容范围，
+                // 留着会让滚轮在错误基准上累加、动画长期追不上目标
+                _targetOffset = 0;
                 Controls.Add(_content);
             }
 
@@ -147,10 +155,12 @@ namespace GuyueBox.UI
 
         public void ScrollByWheel(int delta)
         {
-            int step = Math.Abs(delta) / 2;
-            if (step < 40) step = 40;
-            if (delta > 0) SetOffset(_offset - step);
-            else SetOffset(_offset + step);
+            // 一格滚轮 ≈ 120px（标准 Win32 滚轮增量），与系统行为一致；
+            // 旧版减半（60px/格）会让人觉得"滚不动/滚得慢"
+            int step = Math.Abs(delta);
+            if (step < 60) step = 60;
+            if (delta > 0) SetOffset(_targetOffset - step, true);
+            else SetOffset(_targetOffset + step, true);
         }
 
         public void ScrollToTop()
@@ -158,14 +168,68 @@ namespace GuyueBox.UI
             SetOffset(0);
         }
 
-        private void SetOffset(int value)
+        // ---------------- 平滑滚动：滚轮目标值插值，消除逐行跳动的生硬感 ----------------
+
+        private int _targetOffset;
+        private System.Windows.Forms.Timer _smoothTimer;
+
+        private void EnsureSmoothTimer()
         {
-            int max = Math.Max(0, _contentHeight - ClientSize.Height);
+            if (_smoothTimer != null) return;
+            _smoothTimer = new System.Windows.Forms.Timer { Interval = 12 };
+            _smoothTimer.Tick += delegate
+            {
+                ApplySmoothStep();
+            };
+        }
+
+        private int ClampOffset(int value)
+        {
+            int view = ClientSize.Height;
+            int max = Math.Max(_contentHeight, view) - view;
+            if (max < 0) max = 0;
             if (value < 0) value = 0;
             if (value > max) value = max;
+            return value;
+        }
+
+        private void SetOffset(int value)
+        {
+            SetOffset(value, false);
+        }
+
+        /// <summary>animate=true 时滚向目标值（指数插值），false 时立即到位（拖动/程序化滚动）。</summary>
+        private void SetOffset(int value, bool animate)
+        {
+            value = ClampOffset(value);
+            if (animate)
+            {
+                if (value == _offset && value == _targetOffset) return;
+                _targetOffset = value;
+                EnsureSmoothTimer();
+                _smoothTimer.Start();
+                return;
+            }
+
+            _targetOffset = value;
+            if (_smoothTimer != null) _smoothTimer.Stop();
             if (value == _offset) return;
 
             _offset = value;
+            ApplyOffset();
+            UpdateThumb();
+            Invalidate();
+        }
+
+        /// <summary>平滑滚动帧内应用偏移：不走 SetOffset（那个 false 分支会 Stop 掉平滑 Timer，
+        /// 导致动画第一帧就中断——滚轮每格只动一小段的根因）。</summary>
+        private void ApplySmoothStep()
+        {
+            int diff = _targetOffset - _offset;
+            if (diff == 0) { _smoothTimer.Stop(); return; }
+            int step = (int)Math.Round(diff * 0.45);
+            if (Math.Abs(diff) < 3) step = diff;
+            _offset = ClampOffset(_offset + step);
             ApplyOffset();
             UpdateThumb();
             Invalidate();
@@ -289,10 +353,24 @@ namespace GuyueBox.UI
             base.OnMouseWheel(e);
         }
 
+        /// <summary>释放平滑滚动 Timer（切页销毁控件树后，Win32 定时器若仍触发会访问已释放的 _content）。</summary>
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && _smoothTimer != null)
+            {
+                _smoothTimer.Stop();
+                _smoothTimer.Dispose();
+                _smoothTimer = null;
+            }
+            base.Dispose(disposing);
+        }
+
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
-            using (SolidBrush b = new SolidBrush(Theme.WindowBg))
+            // 用自身 BackColor 画背景（而不是硬编码页面色）：
+            // 侧栏里的 ScrollHost 必须跟侧栏同色（ChromeBg），否则导航项下方会露出一段灰色
+            using (SolidBrush b = new SolidBrush(BackColor))
             {
                 g.FillRectangle(b, ClientRectangle);
             }
@@ -304,7 +382,7 @@ namespace GuyueBox.UI
             if (_offset > 0)
             {
                 using (LinearGradientBrush b = new LinearGradientBrush(
-                    new Rectangle(0, 0, 1, fade), Theme.WindowBg, Color.Transparent, 90f))
+                    new Rectangle(0, 0, 1, fade), BackColor, Color.Transparent, 90f))
                 {
                     g.FillRectangle(b, 0, 0, ClientSize.Width, fade);
                 }
@@ -312,7 +390,7 @@ namespace GuyueBox.UI
             if (_offset < Math.Max(0, _contentHeight - ClientSize.Height))
             {
                 using (LinearGradientBrush b = new LinearGradientBrush(
-                    new Rectangle(0, ClientSize.Height - fade, 1, fade), Color.Transparent, Theme.WindowBg, 90f))
+                    new Rectangle(0, ClientSize.Height - fade, 1, fade), Color.Transparent, BackColor, 90f))
                 {
                     g.FillRectangle(b, 0, ClientSize.Height - fade, ClientSize.Width, fade);
                 }
@@ -374,11 +452,17 @@ namespace GuyueBox.UI
 
             int delta = unchecked((short)((long)m.WParam >> 16));
 
-            // 指针在自带滚动条的表格上时，优先滚动表格
+            // 指针在自带滚动条的表格上时，优先滚动表格；
+            // 表格无溢出或已滚到端时穿透给页面，保证整页连续滚动（否则滚轮在表格上会"失灵"）
             if (grid != null)
             {
-                grid.ScrollByWheel(delta);
-                return true;
+                if (grid.ScrollByWheel(delta)) return true;
+                if (host != null)
+                {
+                    host.ScrollByWheel(delta);
+                    return true;
+                }
+                return false;
             }
 
             if (host == null) return false;

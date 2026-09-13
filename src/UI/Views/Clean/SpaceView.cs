@@ -37,7 +37,7 @@ namespace GuyueBox.UI.Views
 
             _summary.Caption = "分析概况";
             _summary.IconKind = "disk";
-            _summary.CaptionColor = Theme.Cyan;
+            _summary.CaptionColor = Theme.Accent;
 
             AddAction("选择磁盘", "folder", ButtonVariant.Secondary, OnPickDrive, 110);
             _runButton = AddAction("开始分析", "refresh", ButtonVariant.Primary, OnRunClick, 118);
@@ -77,7 +77,7 @@ namespace GuyueBox.UI.Views
 
         private void BuildLayout()
         {
-            AddFull(_notice, 42, 18);
+            AddFull(_notice, 34, 12);
 
             FlowLayoutPanel row = MakeRow(0, 18);
             row.Controls.Add(_summary);
@@ -358,7 +358,7 @@ namespace GuyueBox.UI.Views
                 }
                 else
                 {
-                    if (File.Exists(target)) Shell.Run("explorer.exe", "/select,\"" + target + "\"", 0);
+                    if (File.Exists(target)) Shell.OpenSelect(target);
                     else Dialog.Warn(this, "无法定位", "文件不存在：" + target);
                 }
             }

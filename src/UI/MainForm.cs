@@ -1,4 +1,9 @@
-﻿﻿using System;
+﻿/* ============================================================
+ * 文件说明：主窗体：整体框架布局（顶栏/侧栏导航/内容区/状态栏）、页面切换与路由、窗口持久化与全局快捷操作。
+ * 项目：古月工具包（GuyueBox）
+ * ============================================================ */
+
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Runtime.InteropServices;
@@ -157,6 +162,8 @@ namespace GuyueBox.UI
         {
             if (disposing)
             {
+                // 切页动画进行中关窗：先停表并归位，防止 Tick 继续触碰已释放的页面
+                FinishPageAnim();
                 Application.RemoveMessageFilter(_wheelRouter);
                 _statusTimer.Dispose();
             }
@@ -378,6 +385,8 @@ namespace GuyueBox.UI
             _navFlow.Padding = new Padding(6, 8, 6, 12);
             _navFlow.SetBounds(0, 0, SidebarWidth, 600);
 
+            // 滚动容器同色：不设的话默认内容区底色，导航项结束后会露出一段异色带
+            _sidebarScroll.BackColor = Theme.ChromeBg;
             _sidebarScroll.SetContent(_navFlow);
             _sidebar.Controls.Add(_sidebarScroll);
 
@@ -453,6 +462,16 @@ namespace GuyueBox.UI
         private Control _pageAnimNew;
         private Control _pageAnimOld;
 
+        /// <summary>把全部页面视图归位到 (0,0)（视差动画只动两个页，其余页可能残留偏移）。</summary>
+        private void ResetViewLocations()
+        {
+            for (int i = 0; i < _entries.Count; i++)
+            {
+                Control v = _entries[i].View;
+                if (v != null && v.Location != new Point(0, 0)) v.Location = new Point(0, 0);
+            }
+        }
+
         /// <summary>立即终结进行中的切页动画（快速连点时的竞态防护）。</summary>
         private void FinishPageAnim()
         {
@@ -468,14 +487,16 @@ namespace GuyueBox.UI
             }
             _pageAnimNew = null;
             _pageAnimOld = null;
+            ResetViewLocations(); // 多轮连点后可能有更早的页残留偏移，全部归位
         }
 
         public void NavigateTo(string key)
         {
             if (key == _currentKey)
             {
-                ViewBase cur = EnsureView(FindEntry(key));
-                cur.BringToFront();
+                NavEntry curEntry = FindEntry(key);
+                if (curEntry == null) return;
+                EnsureView(curEntry).BringToFront();
                 return;
             }
 
@@ -507,60 +528,15 @@ namespace GuyueBox.UI
         }
 
         /// <summary>
-        /// 页面切换动画：新页 EaseOutBack 轻回弹下滑（约 160ms），
-        /// 旧页同步左移视差（约 1/3 幅度）后隐藏——方向感与层次感同时到位。
+        /// 页面切换：直切（旧页立即隐藏、新页原地显示）。
+        /// 旧版视差滑动动画与快速切页存在竞态（两页重叠/残影/内容加载被中断），
+        /// 且对低配机是纯负担——按用户反馈移除，切换即时完成。
         /// </summary>
         private void AnimateViewIn(Control view, Control oldView)
         {
-            if (!AppSettings.Animations)
-            {
-                if (oldView != null) oldView.Visible = false;
-                return;
-            }
-            try
-            {
-                const int frames = 10;
-                const int travel = 26;
-                int step = 0;
-                _pageAnimNew = view;
-                _pageAnimOld = oldView;
-                System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
-                _pageAnimTimer = timer;
-                timer.Interval = 16;
-                timer.Tick += delegate
-                {
-                    if (_pageAnimTimer != timer) { timer.Stop(); timer.Dispose(); return; } // 已被新动画接管
-                    step++;
-                    if (step >= frames)
-                    {
-                        view.Location = new Point(0, 0);
-                        if (oldView != null && !oldView.IsDisposed) oldView.Visible = false;
-                        _pageAnimTimer = null;
-                        _pageAnimNew = null;
-                        _pageAnimOld = null;
-                        timer.Stop();
-                        timer.Dispose();
-                        return;
-                    }
-                    float t = step / (float)frames;
-                    // EaseOutBack：终点前轻微过冲再回弹
-                    float c1 = 1.7f;
-                    float c3 = c1 + 1f;
-                    float ease = 1f + c3 * (float)Math.Pow(t - 1, 3) + c1 * (float)Math.Pow(t - 1, 2);
-                    view.Location = new Point(0, (int)Math.Round(travel * (1f - ease)));
-                    if (oldView != null && !oldView.IsDisposed)
-                    {
-                        // 旧页视差：与进度同向左移并小幅上移，营造推入层次
-                        oldView.Location = new Point((int)Math.Round(-60f * ease), (int)Math.Round(-18f * ease));
-                    }
-                };
-                timer.Start();
-            }
-            catch
-            {
-                view.Location = new Point(0, 0);
-                if (oldView != null) oldView.Visible = false;
-            }
+            if (oldView != null) oldView.Visible = false;
+            view.Location = new Point(0, 0);
+            view.Visible = true;
         }
 
         private void RefreshCurrent()

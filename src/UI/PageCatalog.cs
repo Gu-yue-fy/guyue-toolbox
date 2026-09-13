@@ -1,4 +1,9 @@
-﻿using System;
+﻿/* ============================================================
+ * 文件说明：页面目录：全部功能页的注册表（键名 -> 构造器），新增页面只需在此登记一行。
+ * 项目：古月工具包（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Collections.Generic;
 using GuyueBox.UI.Views;
 
@@ -41,6 +46,7 @@ namespace GuyueBox.UI
             Module("优化", "optimize", "优化中心", "tune", delegate { return new OptimizeView(); }),
             Module("优化", "power", "电源计划", "power", delegate { return new PowerPlansView(); }),
             Module("优化", "bench", "性能基准", "gauge", delegate { return new BenchmarkView(); }),
+            Module("优化", "timer", "高精度计时器", "clock", delegate { return new TimerView(); }),
 
             // ---- 清理与磁盘（六合一）----
             Module("清理与磁盘", "cleanup", "清理与磁盘", "clean", delegate
@@ -62,16 +68,15 @@ namespace GuyueBox.UI
             Module("系统管理", "services", "系统配置", "services", delegate
             {
                 return new TabbedView("系统配置",
-                    "服务 / 计划任务 / 启动项 / 右键菜单 / 设备 / 还原点 / 系统维护，系统内容集中管理",
-                    new string[] { "服务管理", "计划任务", "启动项管理", "右键菜单", "设备管理", "系统还原点", "系统维护" },
+                    "服务 / 计划任务 / 启动项 / 右键菜单 / 设备 / 还原点，系统内容集中管理",
+                    new string[] { "服务管理", "计划任务", "启动项管理", "右键菜单", "设备管理", "系统还原点" },
                     new Func<ViewBase>[] {
                         delegate { return new ServicesView(); },
                         delegate { return new ScheduledTasksView(); },
                         delegate { return new StartupView(); },
                         delegate { return new ContextMenuView(); },
                         delegate { return new DeviceView(); },
-                        delegate { return new RestoreView(); },
-                        delegate { return new MaintenanceView(); }
+                        delegate { return new RestoreView(); }
                     });
             }),
             Module("系统管理", "process", "进程管理", "process", delegate { return new ProcessView(); }),

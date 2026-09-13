@@ -1,10 +1,13 @@
 param(
     [string]$SourcePath = "",
-    [string]$Ico = "c:\Users\Administrator\CodeBuddy\系统优化工具箱\src\Assets\app.ico"
+    [string]$Ico = ""
 )
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
+
+$root = Split-Path -Parent $PSScriptRoot
+if (-not $Ico) { $Ico = Join-Path $root 'src\Assets\app.ico' }
 
 $srcImage = [System.Drawing.Image]::FromFile($SourcePath)
 $sizes = @(256, 64, 48, 32, 16)

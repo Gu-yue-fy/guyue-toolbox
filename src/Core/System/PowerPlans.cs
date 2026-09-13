@@ -71,13 +71,14 @@ namespace GuyueBox.Core
             error = "";
             try
             {
+                string target = SchemeUltimate; // 预置了终极性能的系统直接激活官方 GUID
                 Shell.Result dup = Shell.Run("powercfg.exe", "/duplicatescheme " + SchemeUltimate, 20000);
                 if (dup.Ok)
                 {
                     Match m = Regex.Match(dup.All, @"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}");
-                    if (m.Success) SchemeUltimate.ToString();
+                    if (m.Success) target = m.Value; // 克隆成功：激活克隆出的新实例（原代码丢弃了新 GUID）
                 }
-                Shell.Result act = Shell.Run("powercfg.exe", "/setactive " + SchemeUltimate, 20000);
+                Shell.Result act = Shell.Run("powercfg.exe", "/setactive " + target, 20000);
                 if (!act.Ok) { error = act.All.Trim(); return false; }
                 return true;
             }

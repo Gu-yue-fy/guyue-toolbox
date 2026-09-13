@@ -1,4 +1,5 @@
 ﻿﻿using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 using GuyueBox.Core;
@@ -27,7 +28,7 @@ namespace GuyueBox.UI.Views
 
             _summary.Caption = "软件设置";
             _summary.IconKind = "feature";
-            _summary.CaptionColor = Theme.Cyan;
+            _summary.CaptionColor = Theme.Accent;
 
             _info.Caption = "关于";
             _info.IconKind = "info";
@@ -37,9 +38,120 @@ namespace GuyueBox.UI.Views
             _info.Add("设置位置", "HKCU\\Software\\GuyueBox\\Settings");
             _info.Invalidate();
 
+            AddAction("导出配置", "save", ButtonVariant.Secondary, OnExportClick, 110);
+            AddAction("导入配置", "folder", ButtonVariant.Secondary, OnImportClick, 110);
+            AddAction("操作日志", "list", ButtonVariant.Ghost, OnLogClick, 110);
+
             BuildThemeRow();
             BuildToggles();
             BuildLayout();
+        }
+
+        /// <summary>导出当前优化配置（已启用项 Id 清单 JSON）。</summary>
+        private void OnExportClick(object sender, EventArgs e)
+        {
+            using (SaveFileDialog dlg = new SaveFileDialog())
+            {
+                dlg.Filter = "配置文件 (*.json)|*.json";
+                dlg.FileName = "GuyueBox_配置_" + DateTime.Now.ToString("yyyyMMdd");
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                try
+                {
+                    TweakLibrary.ExportState(dlg.FileName);
+                    Dialog.Success(this, "导出完成", "当前优化配置已导出到：\r\n" + dlg.FileName +
+                        "\r\n\r\n在其他机器上用「导入配置」即可一键复刻。");
+                }
+                catch (Exception ex) { Dialog.Error(this, "导出失败", ex.Message); }
+            }
+        }
+
+        /// <summary>导入优化配置（应用 JSON 中列出的项；未列出的保持现状）。</summary>
+        private void OnImportClick(object sender, EventArgs e)
+        {
+            using (OpenFileDialog dlg = new OpenFileDialog())
+            {
+                dlg.Filter = "配置文件 (*.json)|*.json";
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                List<string> errors = new List<string>();
+                int ok;
+                try { ok = TweakLibrary.ImportState(dlg.FileName, errors); }
+                catch (Exception ex) { Dialog.Error(this, "导入失败", ex.Message); return; }
+
+                if (errors.Count > 0)
+                {
+                    string text = "成功 " + ok + " 项，失败 " + errors.Count + " 项：\r\n";
+                    for (int i = 0; i < errors.Count && i < 8; i++) text += "· " + errors[i] + "\r\n";
+                    Dialog.Warn(this, "导入完成", text);
+                }
+                else
+                {
+                    Dialog.Success(this, "导入完成", "成功应用 " + ok + " 项优化配置。");
+                }
+                SetSubtitle("配置导入完成（" + ok + " 项）。", Theme.Success);
+            }
+        }
+
+        /// <summary>操作日志弹窗：展示注册表操作记录，支持按组回滚。</summary>
+        private void OnLogClick(object sender, EventArgs e)
+        {
+            Form dlg = new Form();
+            dlg.Text = "操作日志（最近 400 条）";
+            dlg.BackColor = Theme.WindowBg;
+            dlg.Size = new Size(780, 520);
+            dlg.StartPosition = FormStartPosition.CenterParent;
+            dlg.MinimizeBox = false; dlg.MaximizeBox = false;
+            dlg.Font = Theme.FontBody;
+
+            DarkGrid grid = new DarkGrid();
+            grid.ReadOnly = true;
+            grid.UseOwnScrollbar = true;
+            grid.Dock = DockStyle.Fill;
+            grid.AddTextColumn("时间", 130, false);
+            grid.AddTextColumn("动作", 90, false);
+            grid.AddFillColumn("详情", 300);
+            grid.ColumnClickSort = true;
+
+            AccentButton revertBtn = new AccentButton();
+            revertBtn.Text = "还原选中行所属的整组改动";
+            revertBtn.Variant = ButtonVariant.Danger;
+            revertBtn.Height = 32;
+            revertBtn.Enabled = false;
+            revertBtn.Click += delegate
+            {
+                if (grid.SelectedRows.Count == 0) return;
+                string bid = grid.SelectedRows[0].Tag as string;
+                if (string.IsNullOrEmpty(bid)) { Dialog.Info(dlg, "无法回滚", "该记录不属于任何优化组（系统操作）。"); return; }
+                if (!Dialog.Confirm(dlg, "按组回滚", "将还原该优化组的全部注册表改动（含勾选状态，优化中心里对应开关会回退）。继续？")) return;
+                bool ok = RegHelper.Restore(bid);
+                if (ok) Dialog.Success(dlg, "已还原", "该组的全部改动已还原。");
+                else Dialog.Error(dlg, "还原失败", "部分条目还原失败，请查看日志或以管理员身份重试。");
+            };
+
+            List<string> lines = RegLog.Lines();
+            for (int i = 0; i < lines.Count; i++)
+            {
+                string line = lines[i];
+                string time = line.Length > 17 ? line.Substring(0, 17) : line;
+                string rest = line.Length > 19 ? line.Substring(19) : "";
+                string action = rest, detail = "";
+                int sp = rest.IndexOf("  ");
+                if (sp > 0) { action = rest.Substring(0, sp); detail = rest.Substring(sp + 2); }
+                int idx = grid.Rows.Add(time, action, detail);
+                grid.Rows[idx].Tag = RegLog.BackupIdAt(i);
+            }
+            grid.SelectionChanged += delegate { revertBtn.Enabled = grid.SelectedRows.Count > 0; };
+
+            Panel bottom = new Panel();
+            bottom.Dock = DockStyle.Bottom;
+            bottom.Height = 50;
+            bottom.BackColor = Theme.WindowBg;
+            revertBtn.Left = 12;
+            revertBtn.Top = 9;
+            bottom.Controls.Add(revertBtn);
+
+            dlg.Controls.Add(grid);
+            dlg.Controls.Add(bottom);
+            dlg.ShowDialog(this);
         }
 
         public override bool IsBusy
@@ -113,13 +225,13 @@ namespace GuyueBox.UI.Views
 
         private void BuildLayout()
         {
-            AddFull(_notice, 42, 16);
+            AddFull(_notice, 34, 12);
 
             FlowLayoutPanel sumRow = MakeRow(0, 14);
             sumRow.Controls.Add(_summary);
             AddRow(sumRow);
 
-            AddFull(_swatchRow, 0, 0);
+            AddFull(_swatchRow, 56, 0);
             AddFull(MakeToggleRow("界面动画",
                 "页面切换、磁贴弹入、体检得分等过渡效果。关闭后界面即时响应、更省资源。",
                 _animToggle), 64, 0);

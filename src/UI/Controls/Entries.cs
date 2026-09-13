@@ -118,6 +118,7 @@ namespace GuyueBox.UI
         private float _displayScore;      // 0→目标分数的插值
         private float _scanAngle;         // 体检中旋转角
         private Timer _anim;
+        private Func<bool> _tick;         // 当前 tick 逻辑（每次 StartAnim 替换，修复"闭包只捕获首次"问题）
 
         // 分数字号较大，字体缓存起来，避免每次绘制创建 GDI 对象
         private static Font _scoreFont;
@@ -175,19 +176,21 @@ namespace GuyueBox.UI
             else
             {
                 _score = -1;
+                if (_anim != null) _anim.Stop(); // 停止扫描旋转，否则定时器永续重绘且得分恒 0
             }
             Invalidate();
         }
 
         private void StartAnim(Func<bool> tick)
         {
+            _tick = tick; // 每次替换当前 tick：修复"闭包只捕获首次委托"导致后续动画被忽略
             if (_anim == null)
             {
                 _anim = new Timer();
                 _anim.Interval = 16;
                 _anim.Tick += delegate
                 {
-                    if (tick())
+                    if (_tick == null || _tick())
                     {
                         _anim.Stop();
                     }

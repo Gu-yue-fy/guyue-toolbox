@@ -61,6 +61,7 @@ namespace GuyueBox.UI.Views
             _grid.ReadOnly = false;
             _grid.UseOwnScrollbar = true;
             _grid.Columns.Add(new DarkCheckColumn());
+            _grid.CheckOnRowClick = true;;
             _grid.AddFillColumn("文件路径", 200);
             _grid.AddTextColumn("大小", 110, true);
             _grid.AddTextColumn("修改时间", 130, false);
@@ -131,7 +132,7 @@ namespace GuyueBox.UI.Views
 
         private void BuildLayout()
         {
-            AddFull(_notice, 42, 18);
+            AddFull(_notice, 34, 12);
 
             FlowLayoutPanel row = MakeRow(0, 8);
             row.Controls.Add(_summary);
@@ -191,17 +192,27 @@ namespace GuyueBox.UI.Views
             bool rec = _recursive.Checked;
             ThreadPool.QueueUserWorkItem(delegate
             {
+                // 后台线程回投统一走带守卫的 SafePost：窗口关闭后不再触碰已释放控件
+                Action<Action> SafePost = delegate (Action a)
+                {
+                    try
+                    {
+                        if (IsHandleCreated && !IsDisposed) BeginInvoke((MethodInvoker)delegate { try { a(); } catch { } });
+                    }
+                    catch { }
+                };
+
                 List<DuplicateGroup> groups = DuplicateFinder.Find(folder, rec,
                     delegate { return _cancel; },
                     delegate (ScanState s)
                     {
-                        BeginInvoke((MethodInvoker)delegate
+                        SafePost(delegate
                         {
                             _progress.Text = "已扫描 " + s.FilesScanned + " 个文件…";
                         });
                     });
 
-                BeginInvoke((MethodInvoker)delegate
+                SafePost(delegate
                 {
                     _scanning = false;
                     _stopButton.Enabled = false;

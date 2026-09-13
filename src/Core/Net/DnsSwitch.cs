@@ -21,74 +21,81 @@ namespace GuyueBox.Core
             new DnsPreset { Name = "OpenDNS", Primary = "208.67.222.222", Secondary = "208.67.220.220" }
         };
 
+        /// <summary>列出可配置 DNS 的网卡名（结构化 API，避免 netsh 文本解析的列数/编码坑）。</summary>
         public static List<string> ListAdapters()
         {
             List<string> list = new List<string>();
-            Shell.Result r = Shell.Run("netsh.exe", "interface show interface", 20000);
-            if (!r.Ok) return list;
-
-            string[] lines = r.Output.Split(new string[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (string raw in lines)
+            try
             {
-                string line = raw.Trim();
-                if (line.Length == 0) continue;
-                if (line.StartsWith("Admin State", StringComparison.OrdinalIgnoreCase)) continue;
-                if (line.StartsWith("---")) continue;
-
-                string[] tokens = line.Split(new char[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                if (tokens.Length < 4) continue;
-                string name = string.Join(" ", tokens, 3, tokens.Length - 3).Trim();
-                if (name.Length == 0) continue;
-                if (string.Equals(name, "Loopback Pseudo-Interface 1", StringComparison.OrdinalIgnoreCase)) continue;
-                list.Add(name);
+                System.Net.NetworkInformation.NetworkInterface[] nics =
+                    System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces();
+                for (int i = 0; i < nics.Length; i++)
+                {
+                    System.Net.NetworkInformation.NetworkInterface ni = nics[i];
+                    if (ni.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Loopback)
+                        continue;
+                    if (string.Equals(ni.Name, "Loopback Pseudo-Interface 1", StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    if (!list.Contains(ni.Name)) list.Add(ni.Name);
+                }
             }
+            catch { }
             return list;
         }
 
+        /// <summary>读取指定网卡的当前 DNS（注册表结构化读取，兼容 DHCP 与静态配置；不依赖 netsh 文本解析）。</summary>
         public static string GetDns(string adapter)
         {
-            Shell.Result r = Shell.Run("netsh.exe", "interface ip show dns name=\"" + adapter + "\"", 20000);
-            if (!r.Ok) return "（无法读取）";
-
-            string[] lines = r.Output.Split(new string[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
-            bool inBlock = false;
-            string mode = null;
-            List<string> servers = new List<string>();
-
-            foreach (string raw in lines)
+            try
             {
-                string line = raw.Trim();
-                if (line.StartsWith("Configuration for interface", StringComparison.OrdinalIgnoreCase))
-                {
-                    string block = ExtractQuoted(line);
-                    inBlock = string.Equals(block, adapter, StringComparison.OrdinalIgnoreCase);
-                    mode = null;
-                    continue;
-                }
-                if (!inBlock) continue;
+                string guid = FindAdapterGuid(adapter);
+                if (string.IsNullOrEmpty(guid)) return "（无法读取）";
 
-                if (line.StartsWith("Register with which suffix", StringComparison.OrdinalIgnoreCase)) break;
-
-                int col = line.IndexOf(':');
-                if (line.IndexOf("DNS servers configured through DHCP", StringComparison.OrdinalIgnoreCase) >= 0)
+                using (Microsoft.Win32.RegistryKey key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                    @"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\" + guid, false))
                 {
-                    mode = "dhcp";
-                    AddServer(servers, line, col);
-                }
-                else if (line.IndexOf("Statically Configured DNS Servers", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    mode = "static";
-                    AddServer(servers, line, col);
-                }
-                else if (mode != null && col < 0 && line.Length > 0)
-                {
-                    servers.Add(line);
+                    if (key == null) return "";
+                    string ns = Convert.ToString(key.GetValue("NameServer", ""));
+                    if (!string.IsNullOrWhiteSpace(ns))
+                    {
+                        // 静态 DNS：逗号或空格分隔
+                        return ns.Replace(',', ' ').Replace("  ", " ").Trim();
+                    }
+                    string dhcp = Convert.ToString(key.GetValue("DhcpNameServer", ""));
+                    if (!string.IsNullOrWhiteSpace(dhcp)) return dhcp.Trim();
+                    return ""; // 自动获取
                 }
             }
+            catch
+            {
+                return "（无法读取）";
+            }
+        }
 
-            if (servers.Count == 0) return "自动获取 (DHCP)";
-            string prefix = (mode == "static") ? "静态: " : "DHCP: ";
-            return prefix + string.Join("、", servers.ToArray());
+        /// <summary>按连接名找网卡的 GUID（HKLM\...\Network\{类}\{GUID}\Connection\Name）。</summary>
+        private static string FindAdapterGuid(string adapter)
+        {
+            try
+            {
+                using (Microsoft.Win32.RegistryKey root = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                    @"SYSTEM\CurrentControlSet\Control\Network\{4D36E972-E325-11CE-BFC1-08002BE10318}", false))
+                {
+                    if (root == null) return null;
+                    string[] guids = root.GetSubKeyNames();
+                    for (int i = 0; i < guids.Length; i++)
+                    {
+                        using (Microsoft.Win32.RegistryKey conn = root.OpenSubKey(guids[i] + "\\Connection", false))
+                        {
+                            if (conn == null) continue;
+                            string name = Convert.ToString(conn.GetValue("Name"));
+                            if (string.Equals(name, adapter, StringComparison.OrdinalIgnoreCase))
+                                return guids[i];
+                        }
+                    }
+                }
+            }
+            catch { }
+            return null;
         }
 
         public static bool Set(string adapter, string primary, string secondary, out string error)
@@ -111,22 +118,6 @@ namespace GuyueBox.Core
                 "interface ip set dns name=\"" + adapter + "\" source=dhcp validate=no", 20000);
             if (!r.Ok) { error = "恢复为 DHCP 失败：" + r.All.Trim(); return false; }
             return true;
-        }
-
-        private static void AddServer(List<string> servers, string line, int col)
-        {
-            if (col < 0) return;
-            string v = line.Substring(col + 1).Trim();
-            if (v.Length == 0 || string.Equals(v, "None", StringComparison.OrdinalIgnoreCase)) return;
-            servers.Add(v);
-        }
-
-        private static string ExtractQuoted(string line)
-        {
-            int a = line.IndexOf('"');
-            int b = line.LastIndexOf('"');
-            if (a >= 0 && b > a) return line.Substring(a + 1, b - a - 1);
-            return "";
         }
     }
 }

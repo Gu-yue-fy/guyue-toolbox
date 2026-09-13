@@ -46,6 +46,7 @@ namespace GuyueBox.UI.Views
         private void BuildGrid()
         {
             _grid.ReadOnly = true;
+            _grid.ColumnClickSort = true;
             _grid.UseOwnScrollbar = true;
             _grid.AddFillColumn("菜单项", 200);
             _grid.AddTextColumn("位置", 160, false);

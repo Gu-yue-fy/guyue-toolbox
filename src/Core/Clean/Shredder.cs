@@ -19,6 +19,7 @@ namespace GuyueBox.Core
             public long Bytes;
             public int Files;
             public int Errors;
+            public int SkippedDirs;
             public List<string> ErrorMessages = new List<string>();
         }
 
@@ -37,6 +38,17 @@ namespace GuyueBox.Core
             return 0;
         }
 
+        /// <summary>目录联接/符号链接判定：跳过，防止越界粉碎目标真实文件或无限递归。</summary>
+        private static bool IsReparseDir(string dir)
+        {
+            try
+            {
+                DirectoryInfo di = new DirectoryInfo(dir);
+                return (di.Attributes & FileAttributes.ReparsePoint) != 0;
+            }
+            catch { return true; } // 无法判定时按危险处理（跳过）
+        }
+
         private static long MeasureDir(string dir)
         {
             long total = 0;
@@ -49,7 +61,11 @@ namespace GuyueBox.Core
                     catch { }
                 }
                 string[] sub = Directory.GetDirectories(dir);
-                for (int i = 0; i < sub.Length; i++) total += MeasureDir(sub[i]);
+                for (int i = 0; i < sub.Length; i++)
+                {
+                    if (IsReparseDir(sub[i])) continue;
+                    total += MeasureDir(sub[i]);
+                }
             }
             catch
             {
@@ -77,7 +93,7 @@ namespace GuyueBox.Core
             try
             {
                 if (File.Exists(path)) ShredFile(path, passes, result);
-                else if (Directory.Exists(path)) ShredDir(path, passes, result);
+                else if (Directory.Exists(path)) ShredDir(path, passes, result, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
                 else
                 {
                     result.Errors++;
@@ -92,15 +108,23 @@ namespace GuyueBox.Core
             return result;
         }
 
-        private static void ShredDir(string dir, int passes, ShredResult result)
+        private static void ShredDir(string dir, int passes, ShredResult result, HashSet<string> visited)
         {
+            // 联接/符号链接防护：绝不进入目标目录，防止越界粉碎真实文件；visited 防循环联接死递归
+            if (IsReparseDir(dir) || !visited.Add(dir.ToLowerInvariant()))
+            {
+                result.SkippedDirs++;
+                try { Directory.Delete(dir, false); } // 只删联接本身，不动目标
+                catch { }
+                return;
+            }
             try
             {
                 string[] files = Directory.GetFiles(dir);
                 for (int i = 0; i < files.Length; i++) ShredFile(files[i], passes, result);
 
                 string[] sub = Directory.GetDirectories(dir);
-                for (int i = 0; i < sub.Length; i++) ShredDir(sub[i], passes, result);
+                for (int i = 0; i < sub.Length; i++) ShredDir(sub[i], passes, result, visited);
 
                 try { Directory.Delete(dir, false); }
                 catch { }

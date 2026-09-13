@@ -1,4 +1,9 @@
-﻿﻿using System;
+﻿/* ============================================================
+ * 文件说明：注册表读写核心：修改前自动备份原值，还原时精确恢复（含『原本不存在则删除』的空键清理）。
+ * 项目：古月工具包（GuyueBox）
+ * ============================================================ */
+
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
@@ -103,16 +108,16 @@ namespace GuyueBox.Core
             return true;
         }
 
-        /// <summary>把记录写回已打开（可写）的目标键。</summary>
-        public void RestoreInto(RegistryKey target)
+        /// <summary>把记录写回已打开（可写）的目标键。返回是否真正成功。</summary>
+        public bool RestoreInto(RegistryKey target)
         {
-            if (target == null) return;
+            if (target == null) return false;
             try
             {
                 if (!Existed)
                 {
                     target.DeleteValue(Name, false);
-                    return;
+                    return true;
                 }
                 switch (Kind)
                 {
@@ -136,9 +141,11 @@ namespace GuyueBox.Core
                         target.SetValue(Name, Data, RegistryValueKind.String);
                         break;
                 }
+                return true;
             }
             catch
             {
+                return false;
             }
         }
 
@@ -231,6 +238,28 @@ namespace GuyueBox.Core
 
         // ---------------- 写入（带备份） ----------------
 
+        /// <summary>
+        /// 设备实例键专用写入：只写已存在的键，键不存在时静默跳过（返回 true）。
+        /// 杜绝 CreateSubKey 在单显卡/单声卡机器上凭空制造 0001/0002… 幽灵设备键。
+        /// </summary>
+        public static bool SetValueOnExisting(RegistryHive hive, string path, string name,
+            object value, RegistryValueKind kind, string backupId)
+        {
+            try
+            {
+                RegistryKey b = Base(hive);
+                using (RegistryKey probe = b.OpenSubKey(path, false))
+                {
+                    if (probe == null) return true; // 实例不存在：跳过，不算失败
+                }
+                return SetValue(hive, path, name, value, kind, backupId);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         public static bool SetValue(RegistryHive hive, string path, string name, object value,
             RegistryValueKind kind, string backupId)
         {
@@ -242,13 +271,19 @@ namespace GuyueBox.Core
                 RegistryKey b = Base(hive);
                 using (RegistryKey k = b.CreateSubKey(path))
                 {
-                    if (k == null) return false;
+                    if (k == null)
+                    {
+                        RegLog.Add(backupId, "写入失败", hive + "\\" + path + " → " + name + "（无法创建键）");
+                        return false;
+                    }
                     k.SetValue(name, value, kind);
+                    RegLog.Add(backupId, "写入", hive + "\\" + path + " → " + name);
                     return true;
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                RegLog.Add(backupId, "写入失败", hive + "\\" + path + " → " + name + "（" + ex.Message + "）");
                 return false;
             }
         }
@@ -265,11 +300,13 @@ namespace GuyueBox.Core
                 {
                     if (k == null) return true;
                     k.DeleteValue(name, false);
+                    RegLog.Add(backupId, "删除", hive + "\\" + path + " → " + name);
                     return true;
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                RegLog.Add(backupId, "删除失败", hive + "\\" + path + " → " + name + "（" + ex.Message + "）");
                 return false;
             }
         }
@@ -357,10 +394,12 @@ namespace GuyueBox.Core
             }
         }
 
-        /// <summary>把某项优化的所有改动还原到修改前的状态。同键多条目合并开键，兼容旧格式备份。</summary>
+        /// <summary>把某项优化的所有改动还原到修改前的状态。同键多条目合并开键，兼容旧格式备份。
+        /// 返回 true 表示备份存在且全部条目还原成功；存在备份但写入失败时返回 false（不再误报"已还原"）。</summary>
         public static bool Restore(string backupId)
         {
             bool any = false;
+            int fail = 0;
             try
             {
                 List<RegEntry> entries = new List<RegEntry>();
@@ -421,36 +460,51 @@ namespace GuyueBox.Core
                                 {
                                     if (target != null)
                                     {
-                                        for (int i = 0; i < kv.Value.Count; i++) kv.Value[i].RestoreInto(target);
+                                        for (int i = 0; i < kv.Value.Count; i++)
+                                            if (!kv.Value[i].RestoreInto(target)) fail++;
                                     }
                                 }
+                                RegLog.Add(backupId, "还原", kv.Value[0].Hive + "\\" + kv.Value[0].Path + "（" + kv.Value.Count + " 项）");
                             }
                             else
                             {
                                 // 该组全部条目"原本不存在"= 本项新建的键：还原后清理空键
+                                // （必须在 using 之外删除——句柄未关闭时 DeleteSubKeyTree 会静默失败）
+                                string purgePath = null;
                                 using (RegistryKey target = baseKey.OpenSubKey(kv.Value[0].Path, true))
                                 {
                                     if (target != null)
                                     {
-                                        for (int i = 0; i < kv.Value.Count; i++) kv.Value[i].RestoreInto(target);
+                                        for (int i = 0; i < kv.Value.Count; i++)
+                                        {
+                                            if (!kv.Value[i].RestoreInto(target)) fail++;
+                                        }
                                         if (target.ValueCount == 0 && target.SubKeyCount == 0)
                                         {
-                                            try { baseKey.DeleteSubKeyTree(kv.Value[0].Path); } catch { }
+                                            purgePath = kv.Value[0].Path;
                                         }
                                     }
+                                }
+                                if (purgePath != null)
+                                {
+                                    try { baseKey.DeleteSubKeyTree(purgePath); } catch { fail++; }
+                                    RegLog.Add(backupId, "还原", kv.Value[0].Hive + "\\" + kv.Value[0].Path + "（清理新建键）");
                                 }
                             }
                         }
                     }
                     catch
                     {
+                        fail++;
+                        RegLog.Add(backupId, "还原失败", kv.Value[0].Hive + "\\" + kv.Value[0].Path);
                     }
                 }
             }
             catch
             {
+                fail++;
             }
-            return any;
+            return any && fail == 0;
         }
 
         public static bool HasBackup(string backupId)
@@ -485,9 +539,43 @@ namespace GuyueBox.Core
 
         public static bool SetServiceStart(string serviceName, int startType)
         {
+            return SetServiceStart(serviceName, startType, null);
+        }
+
+        /// <summary>带备份的服务启动类型修改：backupId 非空时把系统原 Start 值记入备份组，
+        /// 供 GetServiceStartOriginal 还原（否则重启后只能猜"手动"这个兜底值）。</summary>
+        public static bool SetServiceStart(string serviceName, int startType, string backupId)
+        {
             return SetValue(RegistryHive.LocalMachine,
                 @"SYSTEM\CurrentControlSet\Services\" + serviceName, "Start",
-                startType, RegistryValueKind.DWord, null);
+                startType, RegistryValueKind.DWord, backupId);
+        }
+
+        /// <summary>读取备份组里记录的服务原始 Start 值。无记录返回 -1。</summary>
+        public static int GetServiceStartOriginal(string backupId, string serviceName)
+        {
+            try
+            {
+                RegistryKey b = Base(RegistryHive.CurrentUser);
+                using (RegistryKey key = b.OpenSubKey(BackupKeyPath(backupId), false))
+                {
+                    if (key == null) return -1;
+                    string slot = RegistryHive.LocalMachine + "|SYSTEM\\CurrentControlSet\\Services\\" +
+                        serviceName + "|Start";
+                    string raw = key.GetValue(slot) as string;
+                    if (raw == null) return -1;
+                    RegEntry e;
+                    if (!RegEntry.TryParseSlot(slot, raw, out e)) return -1;
+                    if (!e.Existed) return -1;
+                    int v;
+                    if (int.TryParse(e.Data, NumberStyles.Integer, CultureInfo.InvariantCulture, out v)) return v;
+                    return -1;
+                }
+            }
+            catch
+            {
+                return -1;
+            }
         }
 
         public static string ServiceStartText(int start)

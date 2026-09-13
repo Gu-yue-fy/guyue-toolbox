@@ -373,17 +373,17 @@ namespace GuyueBox.Core
 
                 if (cat.IsRecycleBin)
                 {
-                    result.FreedBytes += cat.Size;
-                    result.DeletedFiles += cat.FileCount;
-                    try
+                    // SHEmptyRecycleBin 返回 Win32 错误码（0=成功），失败不抛异常——必须检查
+                    long rc = Native.SHEmptyRecycleBin(IntPtr.Zero, null,
+                        Native.SHERB_NOCONFIRMATION | Native.SHERB_NOPROGRESSUI | Native.SHERB_NOSOUND);
+                    if (rc == 0)
                     {
-                        Native.SHEmptyRecycleBin(IntPtr.Zero, null,
-                            Native.SHERB_NOCONFIRMATION | Native.SHERB_NOPROGRESSUI | Native.SHERB_NOSOUND);
+                        result.FreedBytes += cat.Size;
+                        result.DeletedFiles += cat.FileCount;
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        result.Errors.Add("回收站：" + ex.Message);
-                        result.FreedBytes -= cat.Size;
+                        result.Errors.Add("清空回收站失败（Win32 错误码 " + rc + "），本次未计入释放量。");
                     }
                     cat.Size = 0;
                     cat.FileCount = 0;

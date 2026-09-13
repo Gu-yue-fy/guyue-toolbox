@@ -29,7 +29,7 @@ namespace GuyueBox.UI.Views
 
             _summary.Caption = "隐私扫描";
             _summary.IconKind = "shield";
-            _summary.CaptionColor = Theme.Purple;
+            _summary.CaptionColor = Theme.Accent;
 
             _scanButton = AddAction("开始扫描", "refresh", ButtonVariant.Primary, OnScanClick, 118);
             _cleanButton = AddAction("清理选中项", "trash", ButtonVariant.Danger, OnCleanClick, 150);
@@ -49,6 +49,7 @@ namespace GuyueBox.UI.Views
             _grid.ReadOnly = false;
             _grid.UseOwnScrollbar = true;
             _grid.Columns.Add(new DarkCheckColumn());
+            _grid.CheckOnRowClick = true;;
             _grid.AddTextColumn("项目", 180, false);
             _grid.AddFillColumn("说明", 260);
             _grid.AddTextColumn("痕迹数", 90, true);
@@ -62,7 +63,7 @@ namespace GuyueBox.UI.Views
 
         private void BuildLayout()
         {
-            AddFull(_notice, 42, 18);
+            AddFull(_notice, 34, 12);
 
             FlowLayoutPanel row = MakeRow(0, 18);
             row.Controls.Add(_summary);

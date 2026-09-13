@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Diagnostics;
+using System.IO;
 using System.Text;
+using System.Threading;
 
 namespace GuyueBox.Core
 {
@@ -39,14 +41,99 @@ namespace GuyueBox.Core
         /// <summary>
         /// 静默执行一条命令，返回标准输出/错误。会隐藏窗口，不阻塞 UI 之外的事情。
         /// </summary>
-        /// <summary>系统控制台输出编码（中文系统 GBK/936；开启全局 UTF-8 时为 UTF-8）。</summary>
+        /// <summary>
+        /// 系统控制台输出编码 = 系统 ANSI 代码页（中文系统 936/GBK）。
+        /// 注意：不能依赖 Console.OutputEncoding——GUI 进程没有控制台时它返回 UTF-8，
+        /// 会让按 GBK 输出的工具中文乱码。
+        /// </summary>
         private static Encoding GetConsoleEncoding()
         {
-            try { return Console.OutputEncoding; }
-            catch { try { return Encoding.GetEncoding(0); } catch { return Encoding.UTF8; } }
+            try
+            {
+                Encoding e = Encoding.GetEncoding(0); // 0 = 系统 ANSI 代码页
+                // 系统开了「Beta: 使用 UTF-8 提供全球语言支持」时 ANSI 即 UTF-8，无需特殊处理
+                return e;
+            }
+            catch
+            {
+                try { return Encoding.Default; }
+                catch { return Encoding.UTF8; }
+            }
+        }
+
+        /// <summary>
+        /// 控制台工具输出解码（自动识别 GBK / UTF-8，根治网络中心乱码）。
+        /// 中文系统上 ipconfig / netsh / netstat 等按控制台代码页（默认 GBK/936）输出，
+        /// 但若系统开了「Beta UTF-8」或工具自身输出 UTF-8，字节又是 UTF-8。
+        /// 两种编码都能"成功解码"成不同文本，单靠合法性校验无法区分，
+        /// 因此用「中文 CJK 字符命中数」打分：正确解码的中文文本会包含大量 CJK 码位，
+        /// 误解码的乱码几乎不含 CJK，取命中多者即可稳定判定。
+        /// </summary>
+        private static string DecodeConsoleOutput(byte[] data)
+        {
+            if (data == null || data.Length == 0) return "";
+
+            bool hasHigh = false;
+            for (int i = 0; i < data.Length; i++)
+            {
+                if (data[i] >= 0x80) { hasHigh = true; break; }
+            }
+            if (!hasHigh) return Encoding.ASCII.GetString(data); // 纯 ASCII，任何编码结果一致
+
+            string ansi = GetConsoleEncoding().GetString(data);   // 系统 ANSI（中文系统=GBK）
+            string utf8 = null;
+            try { utf8 = new UTF8Encoding(false, true).GetString(data); } // 严格 UTF-8
+            catch (DecoderFallbackException) { utf8 = null; }
+            catch (ArgumentException) { utf8 = null; }
+
+            if (utf8 == null) return ansi;          // UTF-8 含非法序列 → 直接按 ANSI
+            if (ansi == utf8) return ansi;          // 两种解码一致 → 任取
+
+            int ansiScore = CountCjk(ansi);
+            int utf8Score = CountCjk(utf8);
+            if (ansiScore != utf8Score)             // 命中中文多者即正确解码
+                return ansiScore > utf8Score ? ansi : utf8;
+
+            // 平局：优先不含替换符（U+FFFD）的一方
+            bool ansiBad = ansi.IndexOf('\uFFFD') >= 0;
+            bool utf8Bad = utf8.IndexOf('\uFFFD') >= 0;
+            if (ansiBad && !utf8Bad) return utf8;
+            return ansi;
+        }
+
+        /// <summary>统计字符串中 CJK 统一表意文字（含扩展 A）的数量，用作解码正确性打分。</summary>
+        private static int CountCjk(string s)
+        {
+            int n = 0;
+            for (int i = 0; i < s.Length; i++)
+            {
+                char c = s[i];
+                if ((c >= 0x4E00 && c <= 0x9FFF) || (c >= 0x3400 && c <= 0x4DBF)) n++;
+            }
+            return n;
+        }
+
+        /// <summary>把子进程输出流读进内存（独立线程，双管道并行读避免死锁）。</summary>
+        private static void CopyStream(Stream src, MemoryStream dst)
+        {
+            try
+            {
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = src.Read(buf, 0, buf.Length)) > 0) dst.Write(buf, 0, n);
+            }
+            catch
+            {
+            }
         }
 
         public static Result Run(string fileName, string arguments, int timeoutMs)
+        {
+            return Run(fileName, arguments, timeoutMs, null);
+        }
+
+        /// <summary>指定输出编码执行（如 winget 输出为 UTF-8），encoding 为 null 时用系统控制台编码。</summary>
+        public static Result Run(string fileName, string arguments, int timeoutMs, Encoding encoding)
         {
             Result r = new Result();
             try
@@ -58,44 +145,51 @@ namespace GuyueBox.Core
                 psi.CreateNoWindow = true;
                 psi.RedirectStandardOutput = true;
                 psi.RedirectStandardError = true;
-                // 控制台工具（netsh/powercfg/dism/cmd…）输出的是系统控制台编码
-                // （中文系统为 GBK/936）——之前强制 UTF-8 解码导致中文乱码。
-                // 跟随控制台实际编码（系统开全局 UTF-8 时自动变为 UTF-8）。
-                Encoding consoleEnc = GetConsoleEncoding();
-                psi.StandardOutputEncoding = consoleEnc;
-                psi.StandardErrorEncoding = consoleEnc;
+                // 输出按原始字节读取，编码在 DecodeConsoleOutput 中自动识别；
+                // 个别特殊工具（如 winget 的 UTF-8）由调用方通过 Run(..., encoding) 显式指定。
 
                 using (Process p = new Process())
                 {
                     p.StartInfo = psi;
                     p.Start();
 
-                    // 异步读双管道：同步先读 stdout 会让 stderr 缓冲塞满时子进程卡死（经典死锁）
-                    StringBuilder stdout = new StringBuilder();
-                    StringBuilder stderr = new StringBuilder();
-                    p.OutputDataReceived += delegate (object s, DataReceivedEventArgs e)
-                    {
-                        if (e.Data != null) stdout.AppendLine(e.Data);
-                    };
-                    p.ErrorDataReceived += delegate (object s, DataReceivedEventArgs e)
-                    {
-                        if (e.Data != null) stderr.AppendLine(e.Data);
-                    };
-                    p.BeginOutputReadLine();
-                    p.BeginErrorReadLine();
+                    // 双管道各用一条线程读「原始字节」：解码延后到读完后按内容自动识别
+                    // （netsh 输出 UTF-8、部分工具输出 GBK，逐行事件回调在解码阶段就已定死编码，无法兼容两者）
+                    MemoryStream outMs = new MemoryStream();
+                    MemoryStream errMs = new MemoryStream();
+                    Thread tOut = new Thread((ThreadStart)delegate { CopyStream(p.StandardOutput.BaseStream, outMs); });
+                    Thread tErr = new Thread((ThreadStart)delegate { CopyStream(p.StandardError.BaseStream, errMs); });
+                    tOut.IsBackground = true;
+                    tErr.IsBackground = true;
+                    tOut.Start();
+                    tErr.Start();
 
                     bool exited = timeoutMs <= 0 || p.WaitForExit(timeoutMs);
                     if (!exited)
                     {
                         try { p.Kill(); } catch { }
                         p.WaitForExit(2000);
+                        tOut.Join(1000);
+                        tErr.Join(1000);
                         r.ExitCode = -1;
                         r.Error = "命令执行超时。";
                         return r;
                     }
-                    p.WaitForExit(); // 无参重载：等待异步输出回调全部排空
-                    r.Output = stdout.ToString();
-                    r.Error = stderr.ToString();
+                    tOut.Join(5000);
+                    tErr.Join(5000);
+
+                    byte[] outBytes = outMs.ToArray();
+                    byte[] errBytes = errMs.ToArray();
+                    if (encoding != null)
+                    {
+                        r.Output = encoding.GetString(outBytes); // 调用方显式指定（如 winget 的 UTF-8）
+                        r.Error = encoding.GetString(errBytes);
+                    }
+                    else
+                    {
+                        r.Output = DecodeConsoleOutput(outBytes);
+                        r.Error = DecodeConsoleOutput(errBytes);
+                    }
                     try { r.ExitCode = p.ExitCode; }
                     catch { r.ExitCode = -1; r.Error = "无法获取退出码。"; }
                 }
@@ -126,6 +220,11 @@ namespace GuyueBox.Core
         }
 
         /// <summary>用资源管理器打开路径。</summary>
+        public static void OpenSelect(string path)
+        {
+            try { Process.Start("explorer.exe", "/select,\"" + path + "\""); } catch { }
+        }
+
         public static void OpenPath(string path)
         {
             try

@@ -52,7 +52,7 @@ namespace GuyueBox.UI.Views
 
             _diskInfo.Caption = "磁盘使用情况";
             _diskInfo.IconKind = "disk";
-            _diskInfo.CaptionColor = Theme.Success;
+            _diskInfo.CaptionColor = Theme.Accent;
 
             // 权限提示按实际情况显示——管理员下不再误报"普通权限"
             if (Native.IsElevated())
@@ -128,92 +128,33 @@ namespace GuyueBox.UI.Views
         }
 
         private AccentButton _checkButton2;
-        private AccentButton _timerButton;
-        private bool _timerOn;
-
-        private void OnTimerToggle(object sender, EventArgs e)
-        {
-            if (_timerOn)
-            {
-                TimerResolution.Disable();
-                _timerOn = false;
-                _timerButton.Text = "开启 0.5ms 高精度计时器";
-                _timerButton.Variant = ButtonVariant.Secondary;
-                _timerButton.Invalidate();
-                SetSubtitle("已恢复默认计时器精度。", Theme.TextSecondary);
-                return;
-            }
-
-            double ms;
-            if (TimerResolution.Enable(out ms))
-            {
-                _timerOn = true;
-                _timerButton.Text = "关闭计时器（当前 " + ms.ToString("0.##") + "ms）";
-                _timerButton.Variant = ButtonVariant.Primary;
-                _timerButton.Invalidate();
-                SetSubtitle("系统定时器精度已提升到 " + ms.ToString("0.##") +
-                    "ms（默认 15.6ms）：游戏的帧生成与网络包计时更均匀，帧时间抖动明显降低。效果在本工具运行期间有效，关闭后系统自动还原。",
-                    Theme.Success);
-            }
-            else
-            {
-                SetSubtitle("设置高精度计时器失败（系统可能不支持）。", Theme.Danger);
-            }
-        }
 
         private void BuildLayout()
         {
-            // 首页聚焦「概览 + 快速动作」：健康体检 → 实时统计 → 游戏工具，
-            // 权限提示条沉底（仅普通权限时可见），详细信息最后。
-            // 功能入口统一走侧栏分组与 Ctrl+K 命令面板，不再铺直达磁贴。
-            AddFull(_health, 156, 16);
+            // 首页聚焦「概览」：健康体检 → 实时统计 → 系统信息 → 磁盘。
+            // 高精度计时器已独立成功能页（优化 → 高精度计时器，支持自动寻优）。
+            AddFull(_health, 156, 14);
 
-            FlowLayoutPanel statsRow = MakeRowFixed(128, 16);
+            FlowLayoutPanel statsRow = MakeRowFixed(128, 14);
             statsRow.Controls.Add(_cpuCard);
             statsRow.Controls.Add(_memCard);
             statsRow.Controls.Add(_diskCard);
             statsRow.Controls.Add(_uptimeCard);
             AddRow(statsRow);
 
-            // 游戏工具：0.5ms 高精度计时器
-            FlowLayoutPanel timerRow = MakeRow(0, 0);
-            _timerButton = new AccentButton();
-            _timerButton.Text = "开启 0.5ms 高精度计时器";
-            _timerButton.IconKind = "clock";
-            _timerButton.Variant = ButtonVariant.Secondary;
-            _timerButton.Size = new Size(238, 40);
-            _timerButton.Click += OnTimerToggle;
-            timerRow.Controls.Add(_timerButton);
-            Label timerHint = new Label();
-            timerHint.Text = "降低游戏帧时间抖动；关闭本工具自动还原";
-            timerHint.ForeColor = Theme.TextMuted;
-            timerHint.Font = Theme.FontSmall;
-            timerHint.TextAlign = ContentAlignment.MiddleLeft;
-            timerHint.AutoSize = true;
-            timerHint.Margin = new Padding(10, 0, 0, 0);
-            timerRow.Controls.Add(timerHint);
-            AddRow(timerRow);
+            AddFull(_notice, 34, 14);
 
-            AddFull(_notice, 42, 16);
-
-            FlowLayoutPanel infoRow = MakeRow(320, 0);
-            infoRow.Controls.Add(_sysInfo);
-            infoRow.Controls.Add(_diskInfo);
-            AddRow(infoRow);
-
-            // 底部弹性 spacer：内容不足视口时吸收余量（卡片保持内容准高，永不裁切）
-            _bottomSpacer.BackColor = Theme.WindowBg;
-            _bottomSpacer.Margin = new Padding(0);
-            _bottomSpacer.Tag = "stretch";
-            _bottomSpacer.Height = 0;
-            Body.Controls.Add(_bottomSpacer);
+            _infoRow = MakeRow(320, 14);
+            _infoRow.Controls.Add(_sysInfo);
+            _infoRow.Controls.Add(_diskInfo);
+            AddRow(_infoRow);
 
             Body.Resize += delegate { SyncInfoHeights(); };
             SyncInfoHeights();
         }
 
+        private FlowLayoutPanel _infoRow;
         private bool _syncingHeights;
-        private readonly Panel _bottomSpacer = new Panel();
 
         private void SyncInfoHeights()
         {
@@ -221,21 +162,26 @@ namespace GuyueBox.UI.Views
             _syncingHeights = true;
             try
             {
-                // 卡片高 = 内容准高（PreferredHeight），内容永不裁切；
-                // 底部余量交给弹性 spacer 吸收（空 panel，视觉干净且不与内容争高度）
+                // 信息行高度自适应视口：
+                // - 大屏（视口 > 内容）：拉高信息/磁盘两卡吸收底部余量——页面恰好铺满，不露空、不需要滚
+                // - 小屏（视口 < 内容）：保持内容准高，超出部分靠滚轮/滚动条浏览
+                // 卡片自绘内容顶部对齐，拉高部分是卡片底色，视觉上是"更大的卡"而不是空缺。
                 int infoHeight = Math.Max(200, _sysInfo.PreferredHeight);
                 int diskHeight = Math.Max(200, _diskInfo.PreferredHeight);
-                if (_sysInfo.Height != infoHeight) _sysInfo.Height = infoHeight;
-                if (_diskInfo.Height != diskHeight) _diskInfo.Height = diskHeight;
+                int cardH = Math.Max(infoHeight, diskHeight);
+
+                int usedTop = Body.Padding.Top + 156 + 14 + 128 + 14 + 34 + 14; // health/stats/notice 及间距
+                int remain = ViewportHeight - usedTop - Body.Padding.Bottom;
+                int rowH = Math.Max(320, remain);
+                if (rowH > 900) rowH = 900; // 超大屏限制卡片扩张幅度
+                if (_infoRow.Height != rowH) _infoRow.Height = rowH;
+
+                cardH = Math.Max(cardH, rowH);
+                if (_sysInfo.Height != cardH) _sysInfo.Height = cardH;
+                if (_diskInfo.Height != cardH) _diskInfo.Height = cardH;
 
                 LayoutRows();
                 RefreshLayout();
-
-                int contentBottom = Math.Max(_sysInfo.Bottom, _diskInfo.Bottom) + Body.Padding.Bottom;
-                int slack = ViewportHeight - contentBottom;
-                int spacerH = slack > 0 ? slack : 0;
-                if (_bottomSpacer.Height != spacerH) _bottomSpacer.Height = spacerH;
-                _bottomSpacer.Visible = spacerH > 0;
             }
             finally
             {
@@ -383,16 +329,13 @@ namespace GuyueBox.UI.Views
             _uptimeCard.Invalidate();
 
             _sysInfo.Clear();
+            // 核心 6 行：概览首屏一屏放下（主板/BIOS/系统版本等完整信息在「导出报告」里）
             _sysInfo.Add("计算机名", s.ComputerName);
             _sysInfo.Add("当前用户", s.UserName);
-            _sysInfo.Add("操作系统", s.OsName);
-            _sysInfo.Add("系统版本", s.OsVersion + "  " + s.OsArch);
+            _sysInfo.Add("操作系统", s.OsName + " (" + s.OsArch + ")");
             _sysInfo.Add("处理器", s.CpuName);
             _sysInfo.Add("核心 / 线程", s.CpuCores + " / " + s.CpuThreads);
             _sysInfo.Add("显卡", s.GpuName);
-            _sysInfo.Add("主板", string.IsNullOrEmpty(s.BaseBoard) ? "未检测到" : s.BaseBoard);
-            _sysInfo.Add("BIOS", string.IsNullOrEmpty(s.BiosVersion) ? "未检测到" : s.BiosVersion);
-            _sysInfo.Add("权限", s.Elevated ? "管理员" : "标准用户");
             _sysInfo.Invalidate();
 
             _diskInfo.Clear();

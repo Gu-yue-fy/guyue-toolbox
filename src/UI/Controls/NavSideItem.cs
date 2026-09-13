@@ -155,10 +155,16 @@ namespace GuyueBox.UI
             {
                 IconPainter.Draw(g, _icon, iconRect, text);
             }
-            g.DrawString(Text, _selected ? Theme.FontBodyBold : Theme.FontBody,
-                GdiCache.Brush(text),
-                new Rectangle(r.X + 32, 0, Math.Max(20, r.Width - 36), Height),
-                new StringFormat { LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter });
+            using (StringFormat sf = new StringFormat
+            {
+                LineAlignment = StringAlignment.Center,
+                Trimming = StringTrimming.EllipsisCharacter
+            })
+            {
+                g.DrawString(Text, _selected ? Theme.FontBodyBold : Theme.FontBody,
+                    GdiCache.Brush(text),
+                    new Rectangle(r.X + 32, 0, Math.Max(20, r.Width - 36), Height), sf);
+            }
         }
 
         protected override void Dispose(bool disposing)

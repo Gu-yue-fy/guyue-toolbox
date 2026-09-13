@@ -164,43 +164,50 @@ namespace GuyueBox.Core
         public bool Recommended { get { return false; } }
 
         /// <summary>显卡厂商识别：N=NVIDIA，A=AMD，I=Intel，空=未识别。</summary>
+        /// <summary>检测本机显卡厂商：返回全部命中厂商的集合串（如双显卡笔记本返回 "IN"），
+        /// 调用方用 Contains('N')/Contains('A') 判断，避免"第一个命中"漏掉独立显卡。</summary>
         public static string DetectVendor()
         {
+            string found = "";
             for (int i = 0; i < 6; i++)
             {
                 string desc = RegHelper.GetValue(RegistryHive.LocalMachine, GpuClass + "\\000" + i, "DriverDesc") as string;
                 if (string.IsNullOrEmpty(desc)) continue;
                 string d = desc.ToLowerInvariant();
-                if (d.Contains("nvidia") || d.Contains("geforce") || d.Contains("quadro")) return "N";
-                if (d.Contains("amd") || d.Contains("radeon") || d.Contains("ati")) return "A";
-                if (d.Contains("intel") || d.Contains("arc")) return "I";
+                if ((d.Contains("nvidia") || d.Contains("geforce") || d.Contains("quadro")) && !found.Contains("N")) found += "N";
+                if ((d.Contains("amd") || d.Contains("radeon") || d.Contains("ati")) && !found.Contains("A")) found += "A";
+                if ((d.Contains("intel") || d.Contains("arc")) && !found.Contains("I")) found += "I";
             }
-            return "";
+            return found;
         }
 
-        private static void WriteSet(string backupId, string[] keys)
+        private static bool WriteSet(string backupId, string[] keys)
         {
+            bool all = true;
             for (int i = 0; i < 4; i++)
             {
                 foreach (string k in keys)
                 {
-                    RegHelper.SetValue(RegistryHive.LocalMachine, GpuClass + "\\000" + i, k, 1,
-                        RegistryValueKind.DWord, backupId);
+                    // 设备实例键专用写入：不存在的实例跳过，不制造幽灵键
+                    if (!RegHelper.SetValueOnExisting(RegistryHive.LocalMachine, GpuClass + "\\000" + i, k, 1,
+                        RegistryValueKind.DWord, backupId)) all = false;
                 }
             }
             // PciLatencyTimerControl 用 0x20（N 卡惯例值）
             if (Array.IndexOf(keys, "D3PCLatency") >= 0)
             {
-                RegHelper.SetValue(RegistryHive.LocalMachine, GpuClass + "\\0000", "PciLatencyTimerControl", 32,
-                    RegistryValueKind.DWord, backupId);
+                if (!RegHelper.SetValue(RegistryHive.LocalMachine, GpuClass + "\\0000", "PciLatencyTimerControl", 32,
+                    RegistryValueKind.DWord, backupId)) all = false;
             }
+            return all;
         }
 
         public bool IsApplied()
         {
             string vendor = DetectVendor();
-            if (vendor != "N" && vendor != "A") return false; // 本机显卡不在适用范围
-            string[] keys = vendor == "A" ? AmdKeys : NvidiaKeys;
+            bool hasN = vendor.Contains("N"), hasA = vendor.Contains("A");
+            if (!hasN && !hasA) return false; // 本机显卡不在适用范围
+            string[] keys = hasA ? AmdKeys : NvidiaKeys;
             string probe = keys[0];
             object v = RegHelper.GetValue(RegistryHive.LocalMachine, GpuClass + "\\0000", probe);
             try { return v != null && Convert.ToInt32(v) == 1; }
@@ -210,12 +217,14 @@ namespace GuyueBox.Core
         public bool Apply()
         {
             string vendor = DetectVendor();
-            // 厂商不适用（Intel 核显 / 未知）时拒绝——绝不再把两套键全写
-            if (vendor != "N" && vendor != "A") return false;
+            // 多厂商集合语义：双显卡笔记本 N/A 两套都写（各自命中即写）
+            bool hasN = vendor.Contains("N"), hasA = vendor.Contains("A");
+            if (!hasN && !hasA) return false; // Intel 核显 / 未知显卡拒绝
             RegHelper.BeginBackup(Id);
-            if (vendor == "A") WriteSet(Id, AmdKeys);
-            else WriteSet(Id, NvidiaKeys);
-            return true;
+            bool ok = true;
+            if (hasN) ok &= WriteSet(Id, NvidiaKeys);
+            if (hasA) ok &= WriteSet(Id, AmdKeys);
+            return ok;
         }
 
         public bool Revert()

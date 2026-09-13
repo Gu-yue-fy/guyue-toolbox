@@ -75,17 +75,16 @@ namespace GuyueBox.Core
         {
             if (!Exists) return false;
             _originalStart = CurrentStart;
-            return RegHelper.SetServiceStart(ServiceName, RegHelper.SvcDisabled);
+            // 带备份：系统原 Start 值持久化到备份组，重启后还原仍能回到真实原值
+            return RegHelper.SetServiceStart(ServiceName, RegHelper.SvcDisabled, _backupId);
         }
 
         public bool Revert()
         {
-            int target = _originalStart;
-            if (target < 0)
-            {
-                // 会话内没有记录时使用合理默认值
-                target = RegHelper.SvcManual;
-            }
+            // 还原优先级：持久化备份 > 会话内记录 > 兜底"手动"
+            int target = RegHelper.GetServiceStartOriginal(_backupId, ServiceName);
+            if (target < 0) target = _originalStart;
+            if (target < 0 || target == RegHelper.SvcDisabled) target = RegHelper.SvcManual;
             return RegHelper.SetServiceStart(ServiceName, target);
         }
     }
@@ -310,11 +309,12 @@ namespace GuyueBox.Core
 
         public bool Revert()
         {
+            bool ok = true;
             for (int i = 0; i < _revert.Length; i++)
             {
-                Shell.Run("bcdedit.exe", _revert[i], 30000);
+                if (!Shell.Run("bcdedit.exe", _revert[i], 30000).Ok) ok = false;
             }
-            return true;
+            return ok;
         }
     }
 

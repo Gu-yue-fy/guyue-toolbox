@@ -73,7 +73,11 @@ namespace GuyueBox.UI
                 GraphicsPath p;
                 if (_paths.TryGetValue(key, out p)) return p;
 
-                if (_paths.Count > PathCacheLimit) _paths.Clear();
+                if (_paths.Count > PathCacheLimit)
+                {
+                    foreach (GraphicsPath stale in _paths.Values) stale.Dispose();
+                    _paths.Clear();
+                }
 
                 p = Gfx.RoundRect(new Rectangle(0, 0, Math.Max(1, r.Width), Math.Max(1, r.Height)), radius);
                 _paths[key] = p;

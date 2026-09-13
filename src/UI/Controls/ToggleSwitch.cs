@@ -50,21 +50,23 @@ namespace GuyueBox.UI
             Invalidate();
         }
 
+        private float _target; // 滑块动画目标（0/1）——字段化，修复"闭包只捕获首次 target"
+
         /// <summary>滑块滑动动画：约 100ms，ease-out。</summary>
         private void StartAnim()
         {
-            float target = _checked ? 1f : 0f;
+            _target = _checked ? 1f : 0f;
             if (_anim == null)
             {
                 _anim = new Timer();
                 _anim.Interval = 16;
                 _anim.Tick += delegate
                 {
-                    float delta = target - _animPos;
+                    float delta = _target - _animPos;
                     _animPos += delta * 0.35f;
                     if (Math.Abs(delta) < 0.02f)
                     {
-                        _animPos = target;
+                        _animPos = _target;
                         _anim.Stop();
                     }
                     Invalidate();

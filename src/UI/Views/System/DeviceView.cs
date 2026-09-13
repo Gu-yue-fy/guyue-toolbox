@@ -55,7 +55,7 @@ namespace GuyueBox.UI.Views
 
         private void BuildLayout()
         {
-            AddFull(_notice, 56, 18);
+            AddFull(_notice, 34, 12);
             AddFull(_grid, 360, 0);
             Body.Resize += delegate { Relayout(); };
             Relayout();
@@ -236,7 +236,12 @@ namespace GuyueBox.UI.Views
         private void SetDeviceState(bool enable)
         {
             DeviceInfo d = Selected;
-            if (d == null || _busy) return;
+            if (_busy) return;
+            if (d == null)
+            {
+                Dialog.Info(this, "未选择设备", "请先在列表中点击选中一个设备（整行高亮），再进行禁用/启用。");
+                return;
+            }
             if (!Native.IsElevated())
             {
                 Dialog.Warn(this, "需要管理员权限", "设备禁用/启用需要管理员权限。\r\n请右键本程序选择「以管理员身份运行」后重试。");

@@ -119,5 +119,16 @@ namespace GuyueBox.UI.Views
                     new Rectangle(0, cy + r + 16, Width, 22), GdiCache.Center);
             }
         }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                // 忙碌中被销毁时停表，防止定时器继续触发并持有已释放控件
+                if (_spin != null) _spin.Stop();
+                _spin.Dispose();
+            }
+            base.Dispose(disposing);
+        }
     }
 }

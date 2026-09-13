@@ -167,7 +167,11 @@ namespace GuyueBox.Core
             PingResult r = new PingResult();
             r.Host = host;
             r.Sent = count;
-            if (string.IsNullOrWhiteSpace(host)) return r;
+            if (string.IsNullOrWhiteSpace(host))
+            {
+                r.MinMs = 0; r.AvgMs = 0; r.MaxMs = 0; // 避免 long.MaxValue 直接进 UI
+                return r;
+            }
             if (count <= 0) count = 4;
             r.Sent = count;
 
@@ -219,11 +223,15 @@ namespace GuyueBox.Core
 
         // ---------------- 端口 ----------------
 
+        /// <summary>
+        /// 枚举全部 TCP/UDP 端口占用（netstat -ano 解析）：
+        /// 附带占用进程 PID 与进程名（IPGlobalProperties 的 API 拿不到 PID，必须走 netstat）。
+        /// </summary>
         public static List<PortInfo> GetListeningPorts()
         {
-            List<PortInfo> list = new List<PortInfo>();
-            IPGlobalProperties props = IPGlobalProperties.GetIPGlobalProperties();
+            var list = new List<PortInfo>();
 
+            // PID → 进程名
             Dictionary<int, string> names = new Dictionary<int, string>();
             try
             {
@@ -232,6 +240,7 @@ namespace GuyueBox.Core
                 {
                     try { names[ps[i].Id] = ps[i].ProcessName; }
                     catch { }
+                    ps[i].Dispose();
                 }
             }
             catch
@@ -240,50 +249,49 @@ namespace GuyueBox.Core
 
             try
             {
-                TcpConnectionInformation[] tcp = props.GetActiveTcpConnections();
-                for (int i = 0; i < tcp.Length; i++)
+                Shell.Result r = Shell.Run("netstat.exe", "-ano", 30000);
+                if (r.Ok)
                 {
-                    TcpConnectionInformation c = tcp[i];
-                    PortInfo p = new PortInfo();
-                    p.Protocol = "TCP";
-                    p.LocalAddress = c.LocalEndPoint.Address.ToString();
-                    p.LocalPort = c.LocalEndPoint.Port;
-                    p.State = c.State.ToString();
-                    list.Add(p);
-                }
-            }
-            catch
-            {
-            }
+                    string[] rows = (r.All ?? "").Split('\n');
+                    for (int i = 0; i < rows.Length; i++)
+                    {
+                        string line = rows[i].Trim();
+                        if (!line.StartsWith("TCP", StringComparison.OrdinalIgnoreCase) &&
+                            !line.StartsWith("UDP", StringComparison.OrdinalIgnoreCase)) continue;
 
-            try
-            {
-                IPEndPoint[] listeners = props.GetActiveTcpListeners();
-                for (int i = 0; i < listeners.Length; i++)
-                {
-                    PortInfo p = new PortInfo();
-                    p.Protocol = "TCP";
-                    p.LocalAddress = listeners[i].Address.ToString();
-                    p.LocalPort = listeners[i].Port;
-                    p.State = "Listening";
-                    list.Add(p);
-                }
-            }
-            catch
-            {
-            }
+                        string[] t = line.Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                        if (t.Length < 3) continue;
 
-            try
-            {
-                IPEndPoint[] udp = props.GetActiveUdpListeners();
-                for (int i = 0; i < udp.Length; i++)
-                {
-                    PortInfo p = new PortInfo();
-                    p.Protocol = "UDP";
-                    p.LocalAddress = udp[i].Address.ToString();
-                    p.LocalPort = udp[i].Port;
-                    p.State = "Listening";
-                    list.Add(p);
+                        PortInfo p = new PortInfo();
+                        p.Protocol = t[0].ToUpperInvariant();
+                        int colon = t[1].LastIndexOf(':');
+                        if (colon < 0) continue;
+                        p.LocalAddress = t[1].Substring(0, colon);
+                        int port;
+                        if (!int.TryParse(t[1].Substring(colon + 1), out port)) continue;
+                        p.LocalPort = port;
+
+                        if (string.Equals(p.Protocol, "TCP", StringComparison.OrdinalIgnoreCase) && t.Length >= 5)
+                        {
+                            p.State = t[3];
+                            int pid;
+                            if (int.TryParse(t[4], out pid)) p.OwningPid = pid;
+                        }
+                        else if (t.Length >= 4) // UDP：无 State 列
+                        {
+                            p.State = "Listening";
+                            int pid;
+                            if (int.TryParse(t[3], out pid)) p.OwningPid = pid;
+                        }
+                        else continue;
+
+                        if (p.OwningPid > 0)
+                        {
+                            string nm;
+                            if (names.TryGetValue(p.OwningPid, out nm)) p.ProcessName = nm;
+                        }
+                        list.Add(p);
+                    }
                 }
             }
             catch
@@ -357,13 +365,6 @@ namespace GuyueBox.Core
             return string.IsNullOrEmpty(r.All) ? "DNS 已恢复为自动获取。" : r.All;
         }
 
-        /// <summary>读取 netsh 网络全局参数。</summary>
-        public static string GetTcpGlobal()
-        {
-            Shell.Result r = Shell.Netsh("int tcp show global");
-            return r.All;
-        }
-
         /// <summary>应用一套保守的 TCP 调优参数。</summary>
         public static string ApplyTcpTuning()
         {
@@ -384,6 +385,36 @@ namespace GuyueBox.Core
             sb.AppendLine(Shell.Netsh("int tcp set heuristics default").All);
             string text = sb.ToString().Trim();
             return string.IsNullOrEmpty(text) ? "TCP 参数已恢复系统默认。" : text;
+        }
+
+        /// <summary>
+        /// 读取各网卡的接口 MTU（netsh interface ipv4 show subinterfaces）。
+        /// 返回「接口名 → MTU」列表（接口名保留原始中文名）。读取失败返回空列表。
+        /// </summary>
+        public static List<KeyValuePair<string, int>> GetMtuList()
+        {
+            List<KeyValuePair<string, int>> result = new List<KeyValuePair<string, int>>();
+            try
+            {
+                Shell.Result r = Shell.Run("netsh.exe", "interface ipv4 show subinterfaces", 20000);
+                string[] lines = (r.All ?? "").Split(new char[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    string line = lines[i].Trim();
+                    // 形如：  12    1500    1500   1500  "以太网"
+                    System.Text.RegularExpressions.Match m = System.Text.RegularExpressions.Regex.Match(
+                        line, @"^(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(.+)$");
+                    if (!m.Success) continue;
+                    int mtu;
+                    if (!int.TryParse(m.Groups[2].Value, out mtu)) continue;
+                    string name = m.Groups[5].Value.Trim().Trim('"');
+                    if (name.Length == 0) continue;
+                    if (name.IndexOf("Loopback", StringComparison.OrdinalIgnoreCase) >= 0) continue; // 回环接口无意义
+                    result.Add(new KeyValuePair<string, int>(name, mtu));
+                }
+            }
+            catch { }
+            return result;
         }
 
         public static string GetIpConfig()

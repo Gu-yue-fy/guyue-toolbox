@@ -57,7 +57,7 @@ namespace GuyueBox.UI.Views
 
         private void BuildLayout()
         {
-            AddFull(_notice, 42, 18);
+            AddFull(_notice, 34, 12);
 
             FlowLayoutPanel row = MakeRow(0, 18);
             row.Controls.Add(_summary);
@@ -203,7 +203,11 @@ namespace GuyueBox.UI.Views
 
         private void OnDeleteClick(object sender, EventArgs e)
         {
-            if (_grid.SelectedRows.Count == 0) return;
+            if (_grid.SelectedRows.Count == 0)
+            {
+                Dialog.Info(this, "未选择还原点", "请先在列表中点击选中一个还原点（整行高亮），再删除。");
+                return;
+            }
             RestorePoint p = _grid.SelectedRows[0].Tag as RestorePoint;
             if (p == null) return;
 

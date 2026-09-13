@@ -47,7 +47,10 @@ namespace GuyueBox.UI.Views
         private void BuildGrid()
         {
             _grid.UseOwnScrollbar = true;
+            _grid.ReadOnly = false; // DarkGrid 默认全表只读——不放开勾选列永远点不动
             _grid.Columns.Add(new DarkCheckColumn());
+            _grid.CheckOnRowClick = true;
+            _grid.ColumnClickSort = true;
             _grid.AddTextColumn("名称", 200, false);
             _grid.AddTextColumn("来源", 170, false);
             _grid.AddTextColumn("发布者 / 程序", 140, false);

@@ -15,7 +15,6 @@ namespace GuyueBox.UI.Views
         private readonly Panel _toolbar = new Panel();
         private readonly TextBox _search = new TextBox();
         private readonly Panel _searchWrap = new Panel();
-        private readonly ComboBox _sort = new ComboBox();
         private readonly CheckBox _incUpdates = new CheckBox();
         private readonly Label _countLabel = new Label();
         private readonly ComboBox _wingetBox = new ComboBox();
@@ -27,13 +26,14 @@ namespace GuyueBox.UI.Views
         private bool _loaded;
         private AccentButton _uninstallButton;
         private AccentButton _openButton;
+        private AccentButton _forceButton;
 
         public ProgramsView()
             : base("已安装程序", "列出本机已安装的软件，可打开安装目录或启动卸载")
         {
             _notice.NoticeIcon = "info";
             _notice.NoticeAccent = Theme.Accent;
-            _notice.NoticeText = "数据来自注册表，软件卸载由系统原生的卸载程序完成，本工具不删除任何文件。部分系统更新与组件默认被隐藏。";
+            _notice.NoticeText = "「卸载选中」调用软件自带卸载程序；「强制卸载」用于卸载程序损坏/残留清理（会删除安装目录与注册表，不可恢复，执行前会列出明细确认）。点击列头可排序。";
 
             _summary.Caption = "已安装程序";
             _summary.IconKind = "apps";
@@ -42,6 +42,7 @@ namespace GuyueBox.UI.Views
             AddAction("刷新", "refresh", ButtonVariant.Secondary, OnRefreshClick, 92);
             _openButton = AddAction("打开位置", "folder", ButtonVariant.Secondary, OnOpenClick, 110);
             _uninstallButton = AddAction("卸载选中", "trash", ButtonVariant.Danger, OnUninstallClick, 118);
+            _forceButton = AddAction("强制卸载", "bolt", ButtonVariant.Danger, OnForceUninstallClick, 118);
 
             BuildGrid();
             BuildToolbar();
@@ -59,6 +60,7 @@ namespace GuyueBox.UI.Views
         {
             _grid.ReadOnly = true;
             _grid.UseOwnScrollbar = true;
+            _grid.ColumnClickSort = true; // 点击列头（名称/大小/安装日期…）排序，与进程管理一致
             _grid.AddFillColumn("名称", 200);
             _grid.AddTextColumn("发布者", 180, false);
             _grid.AddTextColumn("版本", 110, false);
@@ -71,6 +73,16 @@ namespace GuyueBox.UI.Views
                 OpenLocation(e.RowIndex);
             };
             _grid.SelectionChanged += delegate { UpdateActions(); };
+
+            // 大小列存原始字节数（便于按数值大小排序），显示时格式化为易读文本
+            _grid.CellFormatting += delegate (object s, DataGridViewCellFormattingEventArgs e)
+            {
+                if (e.ColumnIndex != 3 || e.RowIndex < 0 || !(e.Value is long)) return;
+                long bytes = (long)e.Value;
+                if (bytes <= 0) { e.Value = "未知"; e.CellStyle.ForeColor = Theme.TextMuted; }
+                else { e.Value = SysInfo.FormatSize(bytes); }
+                e.FormattingApplied = true;
+            };
         }
 
         private void BuildToolbar()
@@ -94,17 +106,6 @@ namespace GuyueBox.UI.Views
             _search.TextChanged += delegate { ApplyFilter(); };
             _searchWrap.Controls.Add(_search);
 
-            _sort.DropDownStyle = ComboBoxStyle.DropDownList;
-            _sort.FlatStyle = FlatStyle.Flat;
-            _sort.BackColor = Theme.CardBg;
-            _sort.ForeColor = Theme.TextPrimary;
-            _sort.Font = Theme.FontBody;
-            _sort.Items.Add("按名称");
-            _sort.Items.Add("按大小");
-            _sort.Items.Add("按安装时间");
-            _sort.SelectedIndex = 0;
-            _sort.SelectedIndexChanged += delegate { ApplyFilter(); };
-
             _incUpdates.AutoSize = true;
             _incUpdates.BackColor = Theme.WindowBg;
             _incUpdates.ForeColor = Theme.TextSecondary;
@@ -119,15 +120,13 @@ namespace GuyueBox.UI.Views
             _countLabel.TextAlign = ContentAlignment.MiddleRight;
 
             _toolbar.Controls.Add(_searchWrap);
-            _toolbar.Controls.Add(_sort);
             _toolbar.Controls.Add(_incUpdates);
             _toolbar.Controls.Add(_countLabel);
 
             _toolbar.Resize += delegate
             {
                 _searchWrap.SetBounds(0, 1, 240, 32);
-                _sort.SetBounds(252, 1, 150, 32);
-                _incUpdates.SetBounds(252 + 150 + 16, 6, _incUpdates.Width, 24);
+                _incUpdates.SetBounds(252, 6, _incUpdates.Width, 24);
                 _countLabel.SetBounds(Math.Max(420, _toolbar.Width - _countLabel.Width - 4), 6,
                     _countLabel.Width, 24);
             };
@@ -135,7 +134,7 @@ namespace GuyueBox.UI.Views
 
         private void BuildLayout()
         {
-            AddFull(_notice, 42, 18);
+            AddFull(_notice, 34, 12);
 
             FlowLayoutPanel row = MakeRow(0, 18);
             row.Controls.Add(_summary);
@@ -231,7 +230,7 @@ namespace GuyueBox.UI.Views
             {
                 Shell.Result r = Shell.Run("winget",
                     "install --id " + id + " -e --silent --accept-source-agreements --accept-package-agreements",
-                    900000);
+                    900000, System.Text.Encoding.UTF8); // winget 输出 UTF-8，与控制台工具（GBK）不同
                 Post(delegate
                 {
                     _busy = false;
@@ -345,34 +344,22 @@ namespace GuyueBox.UI.Views
                 shown.Add(e);
             }
 
-            int mode = _sort.SelectedIndex;
-            if (mode == 1)
+            // 排序交给列头点击（DarkGrid.ColumnClickSort），此处保持数据顺序；
+            // 重建后重新应用用户点选的列排序，避免筛选时丢排序。
+            shown.Sort(delegate (ProgramEntry a, ProgramEntry b)
             {
-                shown.Sort(delegate (ProgramEntry a, ProgramEntry b)
-                {
-                    return b.SizeBytes.CompareTo(a.SizeBytes);
-                });
-            }
-            else if (mode == 2)
-            {
-                shown.Sort(delegate (ProgramEntry a, ProgramEntry b)
-                {
-                    return string.Compare(b.InstallDate, a.InstallDate, StringComparison.Ordinal);
-                });
-            }
+                return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+            });
 
             _grid.Rows.Clear();
             for (int i = 0; i < shown.Count; i++)
             {
                 ProgramEntry e = shown[i];
-                int idx = _grid.Rows.Add(e.Name, e.Publisher, e.Version, e.SizeText, FormatDate(e.InstallDate));
+                int idx = _grid.Rows.Add(e.Name, e.Publisher, e.Version, e.SizeBytes, FormatDate(e.InstallDate));
                 _grid.Rows[idx].Tag = e;
-                if (e.SizeBytes == 0)
-                {
-                    _grid.Rows[idx].Cells[3].Style.ForeColor = Theme.TextMuted;
-                }
             }
             _grid.ClearSelection();
+            _grid.ReapplySort();
 
             _countLabel.Text = "显示 " + shown.Count + " / " + _all.Count + " 项";
             _countLabel.SetBounds(Math.Max(420, _toolbar.Width - _countLabel.Width - 4), 6,
@@ -386,6 +373,7 @@ namespace GuyueBox.UI.Views
             bool has = _grid.SelectedRows.Count > 0;
             _openButton.Enabled = has;
             _uninstallButton.Enabled = has && !_busy;
+            _forceButton.Enabled = has && !_busy;
         }
 
         // --------------------------------------------------------------
@@ -448,6 +436,95 @@ namespace GuyueBox.UI.Views
                     "无法启动该程序的卸载命令。你可以手动在系统「设置 → 应用」中卸载它。\n\n命令：" +
                     entry.UninstallString);
             }
+        }
+
+        /// <summary>
+        /// 强制卸载：原生卸载程序之外的兜底——强杀进程 + 删安装目录 + 清注册表残留。
+        /// 先只读扫描生成明细 → 用户逐项确认 → 执行 → 报告（全部动作记入操作日志，可按组回滚注册表部分）。
+        /// </summary>
+        private void OnForceUninstallClick(object sender, EventArgs e)
+        {
+            if (_grid.SelectedRows.Count == 0)
+            {
+                Dialog.Info(this, "未选择程序", "请先在列表中点击选中一个程序（整行高亮），再执行强制卸载。");
+                return;
+            }
+            ProgramEntry entry = _grid.SelectedRows[0].Tag as ProgramEntry;
+            if (entry == null || _busy) return;
+
+            _busy = true;
+            SetSubtitle("正在扫描「" + entry.Name + "」的安装痕迹…", Theme.Warning);
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                ProgramForcer.Plan plan;
+                try { plan = ProgramForcer.BuildPlan(entry); }
+                catch (Exception ex)
+                {
+                    Post(delegate { _busy = false; Dialog.Error(this, "扫描失败", ex.Message); });
+                    return;
+                }
+                Post(delegate
+                {
+                    _busy = false;
+                    ShowForcePlan(entry, plan);
+                });
+            });
+        }
+
+        /// <summary>展示强制卸载明细并二次确认后执行。</summary>
+        private void ShowForcePlan(ProgramEntry entry, ProgramForcer.Plan plan)
+        {
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+            sb.Append("将强制清除「").Append(entry.Name).Append("」的全部安装痕迹：\r\n\r\n");
+            if (plan.Processes.Count > 0)
+                sb.Append("· 结束进程：").Append(string.Join("、", plan.Processes.ToArray())).Append("\r\n");
+            for (int i = 0; i < plan.Folders.Count; i++)
+                sb.Append("· 删除目录：").Append(plan.Folders[i]).Append("\r\n");
+            for (int i = 0; i < plan.Files.Count; i++)
+                sb.Append("· 删除快捷方式：").Append(plan.Files[i]).Append("\r\n");
+            for (int i = 0; i < plan.RegistryKeys.Count; i++)
+                sb.Append("· 删除注册表：").Append(plan.RegistryKeys[i]).Append("\r\n");
+            sb.Append("\r\n注意：删除不可恢复，请确认以上内容都属于该软件。");
+
+            if (plan.Processes.Count == 0 && plan.Folders.Count == 0 && plan.Files.Count == 0 &&
+                plan.RegistryKeys.Count == 0)
+            {
+                Dialog.Info(this, "无可清理项", "未扫描到「" + entry.Name + "」的安装目录、进程或注册表痕迹。");
+                return;
+            }
+
+            if (!Dialog.Confirm(this, "强制卸载（不可恢复）", sb.ToString())) return;
+
+            _busy = true;
+            UpdateActions();
+            SetSubtitle("正在强制卸载「" + entry.Name + "」…", Theme.Warning);
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                List<string> errors = new List<string>();
+                string report;
+                try { report = ProgramForcer.Execute(plan, errors); }
+                catch (Exception ex) { report = "执行中断：" + ex.Message; }
+
+                Post(delegate
+                {
+                    _busy = false;
+                    UpdateActions();
+                    Load(true); // 刷新列表
+                    if (errors.Count > 0)
+                    {
+                        string text = report + "\r\n\r\n以下项目未能清理（多为文件被占用或权限不足）：\r\n";
+                        for (int i = 0; i < errors.Count && i < 8; i++) text += "· " + errors[i] + "\r\n";
+                        text += "\r\n可重启系统后再试一次。";
+                        Dialog.Warn(this, "强制卸载完成（有遗留）", text);
+                        SetSubtitle("强制卸载完成，" + errors.Count + " 项需重启后重试。", Theme.Warning);
+                    }
+                    else
+                    {
+                        Dialog.Success(this, "强制卸载完成", report);
+                        SetSubtitle("已强制卸载：" + entry.Name, Theme.Success);
+                    }
+                });
+            });
         }
 
         private static string FormatDate(string s)

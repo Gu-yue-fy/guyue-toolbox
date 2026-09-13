@@ -93,7 +93,21 @@ namespace GuyueBox.Core
             {
                 using (ManagementClass mc = new ManagementClass(@"\\.\root\default:SystemRestore"))
                 {
-                    mc.InvokeMethod("CreateRestorePoint", new object[] { description, 12, 100 });
+                    ManagementBaseObject inParams = mc.GetMethodParameters("CreateRestorePoint");
+                    inParams["Description"] = description;
+                    inParams["RestorePointType"] = 12;  // MODIFY_SETTINGS
+                    inParams["EventType"] = 100;        // BEGIN_SYSTEM_CHANGE
+                    using (ManagementBaseObject ret = mc.InvokeMethod("CreateRestorePoint", inParams, null))
+                    {
+                        // ReturnValue=0 才是成功——系统保护被关闭时 WMI 不抛异常但返回错误码，
+                        // 若不检查会让"高危项前置还原点闸门"形同虚设
+                        uint code = ret == null ? 0u : Convert.ToUInt32(ret["ReturnValue"]);
+                        if (code != 0)
+                        {
+                            error = "创建还原点失败（WMI ReturnValue=" + code + "）。请检查「系统保护」是否已开启。";
+                            return false;
+                        }
+                    }
                 }
                 return true;
             }
@@ -111,7 +125,17 @@ namespace GuyueBox.Core
             {
                 using (ManagementClass mc = new ManagementClass(@"\\.\root\default:SystemRestore"))
                 {
-                    mc.InvokeMethod("DeleteRestorePoint", new object[] { sequence });
+                    ManagementBaseObject inParams = mc.GetMethodParameters("DeleteRestorePoint");
+                    inParams["SequenceNumber"] = sequence;
+                    using (ManagementBaseObject ret = mc.InvokeMethod("DeleteRestorePoint", inParams, null))
+                    {
+                        uint code = ret == null ? 0u : Convert.ToUInt32(ret["ReturnValue"]);
+                        if (code != 0)
+                        {
+                            error = "删除还原点失败（WMI ReturnValue=" + code + "）。";
+                            return false;
+                        }
+                    }
                 }
                 return true;
             }

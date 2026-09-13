@@ -60,10 +60,12 @@ namespace GuyueBox.Core
             {
                 object ack = RegHelper.GetValue(RegistryHive.LocalMachine, paths[i], "TcpAckFrequency");
                 object noDelay = RegHelper.GetValue(RegistryHive.LocalMachine, paths[i], "TCPNoDelay");
-                if (ack == null || noDelay == null) return false;
+                object delAck = RegHelper.GetValue(RegistryHive.LocalMachine, paths[i], "TcpDelAckTicks");
+                if (ack == null || noDelay == null || delAck == null) return false;
                 try
                 {
-                    if (Convert.ToInt32(ack) != 1 || Convert.ToInt32(noDelay) != 1) return false;
+                    if (Convert.ToInt32(ack) != 1 || Convert.ToInt32(noDelay) != 1 ||
+                        Convert.ToInt32(delAck) != 0) return false;
                 }
                 catch
                 {
@@ -621,31 +623,33 @@ namespace GuyueBox.Core
         {
             List<string> paths = DevicePaths();
             int seen = 0;
+            bool failed = false;
             for (int i = 0; i < paths.Count; i++)
             {
                 using (RegistryKey k = Registry.LocalMachine.OpenSubKey(paths[i], false))
                 {
                     if (k == null) continue;
-                    CheckGroup(k.GetValueNames(), paths[i], ref seen);
+                    CheckGroup(k.GetValueNames(), paths[i], ref seen, ref failed);
                 }
             }
-            return seen > 0;
+            // 至少一台设备全部达标，且没有任何"存在但未达标"的键
+            return seen > 0 && !failed;
         }
 
-        private void CheckGroup(string[] existing, string path, ref int seen)
+        private void CheckGroup(string[] existing, string path, ref int seen, ref bool failed)
         {
             for (int i = 0; i < _keys.Length; i++)
             {
                 if (Array.IndexOf(existing, _keys[i]) < 0) continue;
                 object v = RegHelper.GetValue(RegistryHive.LocalMachine, path, _keys[i]);
-                if (v == null || !Matches(v, _keys[i])) return; // 存在但未达标 → 未应用
+                if (v == null || !Matches(v, _keys[i])) { failed = true; return; } // 存在但未达标
                 seen++;
             }
             for (int i = 0; i < _dwordKeys.Length; i++)
             {
                 if (Array.IndexOf(existing, _dwordKeys[i]) < 0) continue;
                 object v = RegHelper.GetValue(RegistryHive.LocalMachine, path, _dwordKeys[i]);
-                if (v == null || !Matches(v, _dwordKeys[i])) return;
+                if (v == null || !Matches(v, _dwordKeys[i])) { failed = true; return; }
                 seen++;
             }
         }
@@ -827,11 +831,12 @@ namespace GuyueBox.Core
 
         public bool Revert()
         {
+            bool ok = true;
             for (int i = 0; i < _revert.Length; i++)
             {
-                Shell.Netsh(_revert[i]);
+                if (!Shell.Netsh(_revert[i]).Ok) ok = false;
             }
-            return true;
+            return ok;
         }
     }
 
@@ -901,9 +906,10 @@ namespace GuyueBox.Core
 
         public bool Revert()
         {
-            Ps("Enable-NetAdapterBinding -Name '*' -ComponentID " + ComponentIds +
-                " -ErrorAction SilentlyContinue");
-            return true;
+            // 只检查语法/权限失败（Ok），SilentlyContinue 的绑定缺失不算失败
+            return Shell.Run("powershell.exe",
+                "-NoProfile -Command \"Enable-NetAdapterBinding -Name '*' -ComponentID " + ComponentIds +
+                " -ErrorAction SilentlyContinue\"", 60000).Ok;
         }
     }
 }

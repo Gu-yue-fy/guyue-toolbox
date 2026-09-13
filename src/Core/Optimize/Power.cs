@@ -94,7 +94,8 @@ namespace GuyueBox.Core
             string scheme = SettingPath(CoreParkingMin);
             if (string.IsNullOrEmpty(scheme)) return -1;
             string[] parts = scheme.Split('\\');
-            string schemeGuid = parts[parts.Length - 2];
+            // 路径形如 ...\PowerSchemes\{方案}\{子组}\{设置}：方案 GUID 在倒数第 3 段
+            string schemeGuid = parts[parts.Length - 3];
             object v = RegHelper.GetValue(RegistryHive.LocalMachine,
                 @"SYSTEM\CurrentControlSet\Control\Power\PowerSettings\" + SubProcessor + "\\" + settingGuid +
                 @"\DefaultPowerSchemeValues\" + schemeGuid, which);
@@ -136,9 +137,14 @@ namespace GuyueBox.Core
 
         public bool IsApplied()
         {
-            object v = RegHelper.GetValue(RegistryHive.LocalMachine,
+            // 两个键都为 0 才算已应用（Apply 写入 PlatformAoAcOverride + CsEnabled 两值）
+            object ao = RegHelper.GetValue(RegistryHive.LocalMachine,
                 @"SYSTEM\CurrentControlSet\Control\Power", "PlatformAoAcOverride");
-            return v != null && Convert.ToInt32(v) == 0;
+            object cs = RegHelper.GetValue(RegistryHive.LocalMachine,
+                @"SYSTEM\CurrentControlSet\Control\Power", "CsEnabled");
+            if (ao == null || cs == null) return false;
+            try { return Convert.ToInt32(ao) == 0 && Convert.ToInt32(cs) == 0; }
+            catch { return false; }
         }
 
         public bool Apply()
@@ -219,7 +225,8 @@ namespace GuyueBox.Core
             string scheme = SettingPath();
             if (string.IsNullOrEmpty(scheme)) return false;
             string[] parts = scheme.Split('\\');
-            string schemeGuid = parts[parts.Length - 2];
+            // 路径形如 ...\PowerSchemes\{方案}\{子组}\{设置}：方案 GUID 在倒数第 3 段
+            string schemeGuid = parts[parts.Length - 3];
             int ac = RegHelper.GetInt(RegistryHive.LocalMachine,
                 @"SYSTEM\CurrentControlSet\Control\Power\PowerSettings\" + SubProcessor + "\\" + IdleDisable +
                 @"\DefaultPowerSchemeValues\" + schemeGuid, "ACSettingIndex", 0);
@@ -700,11 +707,17 @@ namespace GuyueBox.Core
         {
             object scheme = RegHelper.GetValue(RegistryHive.LocalMachine, UserPowerSchemes, "ActivePowerScheme");
             if (scheme == null || string.IsNullOrEmpty(scheme.ToString())) return false;
-            Shell.Run("powercfg.exe",
-                "-setacvalueindex scheme_current " + PciSubgroup + " " + AspmSetting + " 1", 30000);
-            Shell.Run("powercfg.exe",
-                "-setdcvalueindex scheme_current " + PciSubgroup + " " + AspmSetting + " 1", 30000);
-            return Shell.Run("powercfg.exe", "-setactive scheme_current", 30000).Ok;
+            // 还原到该电源计划的出厂默认值（DefaultPowerSchemeValues），而非写死 1
+            string defPath = @"SYSTEM\CurrentControlSet\Control\Power\PowerSettings\" + PciSubgroup +
+                "\\" + AspmSetting + @"\DefaultPowerSchemeValues\" + scheme;
+            int ac = RegHelper.GetInt(RegistryHive.LocalMachine, defPath, "ACSettingIndex", 1);
+            int dc = RegHelper.GetInt(RegistryHive.LocalMachine, defPath, "DCSettingIndex", 1);
+            bool ok = Shell.Run("powercfg.exe",
+                "-setacvalueindex scheme_current " + PciSubgroup + " " + AspmSetting + " " + ac, 30000).Ok;
+            ok &= Shell.Run("powercfg.exe",
+                "-setdcvalueindex scheme_current " + PciSubgroup + " " + AspmSetting + " " + dc, 30000).Ok;
+            ok &= Shell.Run("powercfg.exe", "-setactive scheme_current", 30000).Ok;
+            return ok;
         }
     }
 }

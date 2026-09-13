@@ -28,7 +28,7 @@ namespace GuyueBox.UI.Views
 
             _summary.Caption = "电源计划";
             _summary.IconKind = "power";
-            _summary.CaptionColor = Theme.Success;
+            _summary.CaptionColor = Theme.Accent;
 
             AddAction("刷新", "refresh", ButtonVariant.Secondary, delegate { Load(true); }, 92);
             AddAction("推荐方案", "shield", ButtonVariant.Primary, OnRecommendClick, 130);
@@ -57,7 +57,7 @@ namespace GuyueBox.UI.Views
 
         private void BuildLayout()
         {
-            AddFull(_notice, 42, 18);
+            AddFull(_notice, 34, 12);
 
             FlowLayoutPanel row = MakeRow(0, 18);
             row.Controls.Add(_summary);

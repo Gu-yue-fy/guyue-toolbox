@@ -1,7 +1,13 @@
-﻿using System;
+﻿/* ============================================================
+ * 文件说明：页面基类：提供标题/副标题/操作按钮区、Body 行式布局器、滚动与缩放处理等公共设施；所有功能页继承此类。
+ * 项目：古月工具包（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
+using GuyueBox.Core;
 using GuyueBox.UI.Commands;
 
 namespace GuyueBox.UI.Views
@@ -42,7 +48,7 @@ namespace GuyueBox.UI.Views
             Body.WrapContents = false;
             Body.AutoScroll = false;
             Body.BackColor = Theme.WindowBg;
-            Body.Padding = new Padding(26, 16, 26, 20);
+            Body.Padding = new Padding(30, 20, 30, 18);
             Body.SetBounds(0, 0, 400, 400);
 
             _scroll = new ScrollHost();
@@ -130,6 +136,81 @@ namespace GuyueBox.UI.Views
             Invalidate(true);
         }
 
+        // ---------------- 页面元素级联入场 ----------------
+
+        private System.Windows.Forms.Timer _cascTimer;
+        private readonly List<Control> _cascControls = new List<Control>();
+        private readonly List<int> _cascFrom = new List<int>();
+        private readonly List<int> _cascDelta = new List<int>();
+        private float _cascPos;
+
+        /// <summary>
+        /// 页面元素级联入场：首屏前 6 个元素错峰上移到位（约 220ms，EaseOutCubic）。
+        /// 数据在后台加载的同时界面渐进呈现——「加载感」被动效吸收。
+        /// </summary>
+        private void AnimateContentIn()
+        {
+            if (!AppSettings.Animations || Body == null || Body.Controls.Count < 2) return;
+
+            if (_cascTimer != null)
+            {
+                _cascTimer.Stop();
+                RestoreCasc();
+            }
+
+            _cascControls.Clear();
+            _cascFrom.Clear();
+            _cascDelta.Clear();
+            int n = Math.Min(6, Body.Controls.Count);
+            for (int i = 0; i < n; i++)
+            {
+                Control c = Body.Controls[i];
+                _cascControls.Add(c);
+                _cascFrom.Add(c.Top);
+                _cascDelta.Add(18 + i * 5);
+                c.Top = c.Top + _cascDelta[i];
+            }
+            _cascPos = 0;
+
+            if (_cascTimer == null)
+            {
+                _cascTimer = new System.Windows.Forms.Timer { Interval = 16 };
+                _cascTimer.Tick += delegate
+                {
+                    _cascPos += 0.13f;
+                    bool done = _cascPos >= 1f;
+                    if (done) _cascPos = 1f;
+                    float t = 1f - (1f - _cascPos) * (1f - _cascPos) * (1f - _cascPos);
+                    for (int i = 0; i < _cascControls.Count; i++)
+                    {
+                        Control c = _cascControls[i];
+                        if (c.IsDisposed) continue;
+                        c.Top = _cascFrom[i] + (int)(_cascDelta[i] * (1f - t));
+                    }
+                    if (done)
+                    {
+                        RestoreCasc();
+                        _cascTimer.Stop();
+                    }
+                };
+            }
+            Body.SuspendLayout(); // 动画期间挂起流式重排，防止手动位移被布局覆盖
+            _cascTimer.Start();
+        }
+
+        private void RestoreCasc()
+        {
+            for (int i = 0; i < _cascControls.Count; i++)
+            {
+                Control c = _cascControls[i];
+                if (!c.IsDisposed) c.Top = _cascFrom[i];
+            }
+            _cascControls.Clear();
+            _cascFrom.Clear();
+            _cascDelta.Clear();
+            Body.ResumeLayout(false);
+        }
+
         // ---------------- 加载状态反馈 ----------------
 
         /// <summary>
@@ -158,6 +239,7 @@ namespace GuyueBox.UI.Views
                         LayoutActions();
                         _scroll.Relayout(true);
                         Invalidate(true);
+                        AnimateContentIn();
                     });
                 }
                 catch (InvalidOperationException)
@@ -196,6 +278,7 @@ namespace GuyueBox.UI.Views
             if (disposing)
             {
                 _busyPoll.Dispose();
+                if (_cascTimer != null) _cascTimer.Dispose();
             }
             base.Dispose(disposing);
         }

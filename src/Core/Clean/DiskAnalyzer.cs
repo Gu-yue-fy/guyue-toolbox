@@ -124,7 +124,7 @@ namespace GuyueBox.Core
 
                             if (fi.Length >= minFileSize)
                             {
-                                AddTop(topFileList, MakeEntry(fi.FullName, fi.Length, fi.LastWriteTime, false), topFileList.Count, topFileList.Count);
+                                AddTop(topFileList, MakeEntry(fi.FullName, fi.Length, fi.LastWriteTime, false), topFiles, topFiles);
                             }
 
                             // 把文件大小累加到自身及所有上级目录

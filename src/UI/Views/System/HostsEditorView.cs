@@ -61,7 +61,7 @@ namespace GuyueBox.UI.Views
 
         private void BuildLayout()
         {
-            AddFull(_notice, 42, 16);
+            AddFull(_notice, 34, 12);
             AddFull(_editorPanel, 0, 0);
             Body.Resize += delegate { RefreshLayout(); };
             LayoutEditor();
@@ -139,13 +139,15 @@ namespace GuyueBox.UI.Views
 
         private void OnOpenFolder(object sender, EventArgs e)
         {
-            Shell.Run("explorer.exe", "/select,\"" + HostsPath + "\"", 15000);
+            Shell.OpenSelect(HostsPath);
         }
+
+        private bool _resizeHooked;
 
         public override void OnActivated()
         {
             if (_editor.Text.Length == 0 && !_dirty) LoadFile();
-            Body.Resize += delegate { LayoutEditor(); };
+            if (!_resizeHooked) { _resizeHooked = true; Body.Resize += delegate { LayoutEditor(); }; }
         }
     }
 }

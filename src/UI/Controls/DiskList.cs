@@ -25,7 +25,7 @@ namespace GuyueBox.UI
 
         public string Caption = "磁盘使用情况";
         public string IconKind = "disk";
-        public Color CaptionColor = Theme.Success;
+        public Color CaptionColor = Theme.Accent;
 
         public DiskList()
         {

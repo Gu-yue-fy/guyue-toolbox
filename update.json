@@ -1,7 +1,7 @@
 {
-  "version": "1.1.0",
-  "date": "2026-09-12",
-  "url": "https://github.com/Gu-yue-fy/guyue-toolbox/releases/download/v1.1.0/SysToolbox.exe",
-  "sha256": "7d034e2703ed41e1d46ceacf17a9b34eea3724c997f22908cbeffbcb7b88d82a",
-  "notes": "首个公开发布版本：内置自动更新（SHA256 校验）、170+ 项可逆注册表 / 服务优化（9 大类）、垃圾与隐私清理、文件粉碎、重复文件、磁盘健康、启动项 / 服务 / 进程 / 设备管理、网络中心与性能基准。"
+  "version": "1.2.0",
+  "date": "2026-09-13",
+  "url": "https://github.com/Gu-yue-fy/guyue-toolbox/releases/download/v1.2.0/GuyueBox.exe",
+  "sha256": "af3c01ad68eb57f09e5528bbad4a7268813d3e63783a0548f640ac11c3145c63",
+  "notes": "v1.2.0：新增「高精度计时器」页（优化组），实测寻优系统定时器精度以降低游戏帧时间抖动；系统配置现为六合一；优化中心重构为 Provider 式架构，可按分组扩展，优化项覆盖 9 大类、170+ 项。"
 }

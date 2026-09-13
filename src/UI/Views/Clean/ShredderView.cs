@@ -90,7 +90,7 @@ namespace GuyueBox.UI.Views
 
         private void BuildLayout()
         {
-            AddFull(_notice, 42, 18);
+            AddFull(_notice, 34, 12);
 
             FlowLayoutPanel row = MakeRow(0, 18);
             row.Controls.Add(_summary);
@@ -239,7 +239,7 @@ namespace GuyueBox.UI.Views
             try
             {
                 if (entry.IsDir) Shell.OpenPath(entry.Path);
-                else Shell.Run("explorer.exe", "/select,\"" + entry.Path + "\"", 0);
+                else Shell.OpenSelect(entry.Path);
             }
             catch
             {

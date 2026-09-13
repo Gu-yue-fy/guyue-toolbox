@@ -7,22 +7,19 @@ using GuyueBox.Core;
 namespace GuyueBox.UI.Views
 {
     /// <summary>
-    /// 合并页容器（主从式）：左侧竖排分类导航 + 右侧全高内容区。
-    /// 相比旧顶部 chips 页签：子页获得完整高度与更宽的操作空间，分类导航常驻更好找。
-    /// 子页在首次切到时才创建，保持懒加载特性。
+    /// 合并页容器（顶部页签式）：页头下方一排横向 tab（与优化中心分类条同款风格），
+    /// 点击切换下方全宽内容区。子页在首次切到时才创建，保持懒加载特性。
     /// </summary>
     public sealed class TabbedView : ViewBase
     {
-        private const int NavWidth = 176;
-        private const int NavItemHeight = 42;
+        private const int TabRowHeight = 42;
 
         private readonly string[] _labels;
         private readonly Func<ViewBase>[] _factories;
         private readonly ViewBase[] _pages;
-        private readonly Panel _master;
-        private readonly Panel _navPanel;
+        private readonly FlowLayoutPanel _tabRow;
+        private readonly List<AccentButton> _tabs = new List<AccentButton>();
         private readonly Panel _host;
-        private readonly List<NavItem> _navItems = new List<NavItem>();
         private int _index = -1;
 
         public TabbedView(string title, string subtitle, string[] labels, Func<ViewBase>[] factories)
@@ -32,62 +29,57 @@ namespace GuyueBox.UI.Views
             _factories = factories;
             _pages = new ViewBase[labels.Length];
 
-            // 主容器：填满视口的一行
-            _master = new Panel();
-            _master.BackColor = Theme.WindowBg;
-            _master.Tag = "stretch";
-            _master.Margin = new Padding(0);
-
-            // 左侧分类导航（手动布局：不用 Dock，规避停靠顺序坑）
-            _navPanel = new Panel();
-            _navPanel.BackColor = Theme.ChromeBg;
-            _navPanel.Paint += delegate (object s, PaintEventArgs e)
-            {
-                using (Pen p = new Pen(Theme.BorderSoft))
-                {
-                    e.Graphics.DrawLine(p, NavWidth - 1, 0, NavWidth - 1, _navPanel.Height);
-                }
-            };
-            _master.Controls.Add(_navPanel);
+            // 顶部页签行：横向一排 chips，选中=Primary 高亮，其余 Ghost——与优化中心分类条一致
+            _tabRow = new FlowLayoutPanel();
+            _tabRow.FlowDirection = FlowDirection.LeftToRight;
+            _tabRow.WrapContents = false;
+            _tabRow.BackColor = Theme.WindowBg;
+            _tabRow.Height = TabRowHeight;
+            _tabRow.Tag = "row";
+            _tabRow.Margin = new Padding(0, 0, 0, 14);
 
             for (int i = 0; i < labels.Length; i++)
             {
-                NavItem item = new NavItem(labels[i]);
-                item.Bounds = new Rectangle(0, i * NavItemHeight, NavWidth, NavItemHeight);
+                AccentButton tab = new AccentButton();
+                tab.Text = labels[i];
+                tab.IconKind = null;
+                tab.Variant = i == 0 ? ButtonVariant.Primary : ButtonVariant.Ghost;
+                tab.Height = 32;
+                tab.FitToText(96);
+                tab.Margin = new Padding(0, 0, 10, 0);
                 int idx = i;
-                item.Activate += delegate { SwitchTo(idx); };
-                _navPanel.Controls.Add(item);
-                _navItems.Add(item);
+                tab.Click += delegate { SwitchTo(idx); };
+                _tabs.Add(tab);
+                _tabRow.Controls.Add(tab);
             }
+            AddRow(_tabRow);
 
-            // 右侧内容区（手动布局）
+            // 内容区：占 tab 行以下全部空间，子页填满
             _host = new Panel();
             _host.BackColor = Theme.WindowBg;
-            _master.Controls.Add(_host);
+            _host.Tag = "stretch";
+            _host.Margin = new Padding(0);
+            _host.Height = 500;
+            Body.Controls.Add(_host);
 
-            _master.Resize += delegate { LayoutMaster(); };
-
-            AddFull(_master, 600, 0);
             Body.Resize += delegate
             {
-                // 主容器占满视口（扣除 Body 上下 padding），左导航随之满高
-                _master.Height = Math.Max(400, ViewportHeight - 36);
+                // 内容区高度 = 视口 - 页签行 - 间距（保证子页满高可用）
+                _host.Height = Math.Max(300, ViewportHeight - TabRowHeight - 14 - 36);
             };
 
             SwitchTo(0);
         }
 
-        /// <summary>主容器手动布局：左导航固定宽满高，内容区占剩余全部。</summary>
-        private void LayoutMaster()
+        /// <summary>切换到指定子页（探针等自动化测试也用它遍历子页截图）。</summary>
+        public void SwitchTo(int idx)
         {
-            int h = Math.Max(1, _master.Height);
-            _navPanel.SetBounds(0, 0, NavWidth, h);
-            _host.SetBounds(NavWidth, 0, Math.Max(1, _master.Width - NavWidth), h);
-        }
-
-        private void SwitchTo(int idx)
-        {
+            if (idx < 0 || idx >= _pages.Length) return;
             if (_index == idx && _pages[idx] != null && _pages[idx].Visible) return;
+
+            // 内容区高度显式重算：Body 尺寸未变化时 Resize 事件不触发，
+            // _host 会停在初始 500 高度导致子页拉伸错误
+            _host.Height = Math.Max(300, ViewportHeight - TabRowHeight - 14 - 36);
 
             if (_pages[idx] == null)
             {
@@ -115,9 +107,10 @@ namespace GuyueBox.UI.Views
             }
             _index = idx;
 
-            for (int i = 0; i < _navItems.Count; i++)
+            for (int i = 0; i < _tabs.Count; i++)
             {
-                _navItems[i].Selected = i == idx;
+                _tabs[i].Variant = i == idx ? ButtonVariant.Primary : ButtonVariant.Ghost;
+                _tabs[i].Invalidate();
             }
             RefreshLayout();
         }
@@ -141,76 +134,6 @@ namespace GuyueBox.UI.Views
                 ViewBase p = _pages[_index];
                 try { return p != null && p.IsBusy; }
                 catch { return false; }
-            }
-        }
-
-        /// <summary>左列导航项：选中态左侧 accent 条 + 提亮底色。</summary>
-        private sealed class NavItem : Control
-        {
-            private bool _hover;
-            public bool Selected;
-
-            public event EventHandler Activate;
-
-            public NavItem(string text)
-            {
-                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
-                         ControlStyles.UserPaint | ControlStyles.ResizeRedraw | ControlStyles.StandardClick, true);
-                Text = text;
-                Cursor = Cursors.Hand;
-            }
-
-            protected override void OnPaint(PaintEventArgs e)
-            {
-                Graphics g = e.Graphics;
-                g.Clear(Parent.BackColor);
-
-                if (Selected)
-                {
-                    using (SolidBrush b = new SolidBrush(Theme.GridSelection))
-                    {
-                        g.FillRectangle(b, 0, 0, Width, Height);
-                    }
-                    using (SolidBrush b = new SolidBrush(Theme.Accent))
-                    {
-                        g.FillRectangle(b, 0, 6, 3, Height - 12);
-                    }
-                }
-                else if (_hover)
-                {
-                    using (SolidBrush b = new SolidBrush(Theme.GridHover))
-                    {
-                        g.FillRectangle(b, 0, 0, Width, Height);
-                    }
-                }
-
-                Color fc = Selected ? Color.White : (_hover ? Theme.TextPrimary : Theme.TextSecondary);
-                using (SolidBrush b = new SolidBrush(fc))
-                {
-                    Gfx.DrawTextEllipsis(g, Text, Selected ? Theme.FontBodyBold : Theme.FontBody, fc,
-                        new Rectangle(18, 0, Width - 30, Height));
-                }
-            }
-
-            protected override void OnMouseEnter(EventArgs e)
-            {
-                _hover = true;
-                Invalidate();
-                base.OnMouseEnter(e);
-            }
-
-            protected override void OnMouseLeave(EventArgs e)
-            {
-                _hover = false;
-                Invalidate();
-                base.OnMouseLeave(e);
-            }
-
-            protected override void OnClick(EventArgs e)
-            {
-                EventHandler h = Activate;
-                if (h != null) h(this, EventArgs.Empty);
-                base.OnClick(e);
             }
         }
     }

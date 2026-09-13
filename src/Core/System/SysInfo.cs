@@ -1,4 +1,9 @@
-﻿using System;
+﻿/* ============================================================
+ * 文件说明：系统信息采集：硬件/CPU/内存/磁盘/网络适配器，全部走 WMI 与原生 API，不依赖第三方库。
+ * 项目：古月工具包（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;

@@ -1,4 +1,9 @@
-﻿﻿using System;
+﻿/* ============================================================
+ * 文件说明：优化中心：全部注册表优化的浏览/搜索/筛选/开关执行页；行列表按分类懒加载，过滤走可见性切换（零重建）。
+ * 项目：古月工具包（GuyueBox）
+ * ============================================================ */
+
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -110,7 +115,7 @@ namespace GuyueBox.UI.Views
             _owner = owner;
 
             BackColor = Theme.CardBg;
-            Radius = 11;
+            Radius = 12;
             Height = 72;
             Margin = new Padding(0, 0, 0, 9);
             Tag = "stretch";
@@ -224,21 +229,23 @@ namespace GuyueBox.UI.Views
 
         private Color AnimBackColor()
         {
+            // 同描边：只保留"变绿"方向的背景渐变；关闭方向直接回到常态底色（不闪绿）
             Color off = Theme.CardBg;
             Color on = Gfx.Blend(Theme.CardBg, Theme.Success, 0.06);
             float t = AnimProgress();
-            Color from = _applied ? off : on;
-            Color to = _applied ? on : off;
-            return Gfx.Blend(from, to, t);
+            return _applied ? Gfx.Blend(off, on, t) : off;
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             BackColor = AnimBackColor();
             float t = AnimProgress();
+            // 描边动画只保留"变绿"方向（开启开关的成就反馈）；
+            // 关闭方向恒为普通描边——旧公式 blend(绿,灰,t) 首帧是纯绿，
+            // 每个未启用行初次绘制都会"闪一下绿"（用户可见的渲染缺陷）。
             BorderColor = _applied
                 ? Gfx.Blend(Theme.Border, Gfx.Alpha(Theme.Success, 110), t)
-                : Gfx.Blend(Gfx.Alpha(Theme.Success, 110), Theme.Border, t);
+                : Theme.Border;
             base.OnPaint(e);
 
             Graphics g = e.Graphics;
@@ -306,15 +313,15 @@ namespace GuyueBox.UI.Views
 
             _summary.Caption = "优化概览";
             _summary.IconKind = "tune";
-            _summary.CaptionColor = Theme.Success;
+            _summary.CaptionColor = Theme.Accent;
 
             AddAction("一键推荐优化", "bolt", ButtonVariant.Primary, OnRecommendedClick, 152);
             AddAction("全部还原", "refresh", ButtonVariant.Ghost, OnRestoreAllClick, 110);
             AddAction("导出方案", "doc", ButtonVariant.Ghost, OnExportProfile, 110);
-            AddAction("导入方案", "add", ButtonVariant.Secondary, OnImportProfile, 110);
+            AddAction("导入方案", "plus", ButtonVariant.Secondary, OnImportProfile, 110);
             AddAction("刷新状态", "refresh", ButtonVariant.Secondary, delegate { Load(true); }, 110);
 
-            AddFull(_notice, 42, 18);
+            AddFull(_notice, 34, 12);
 
             FlowLayoutPanel row = MakeRow(0, 8);
             row.Controls.Add(_summary);
@@ -890,6 +897,21 @@ namespace GuyueBox.UI.Views
                     }
                     else rpNote = "24 小时内已存在还原点，跳过创建";
 
+                    // #22：谨慎项应用前必须确保有还原点兜底，创建失败则取消应用
+                    if (!hasRecent)
+                    {
+                        Post(delegate
+                        {
+                            _busy = false;
+                            row.SetState(applied); // 保持原状态（未应用）
+                            Dialog.Warn(this, "还原点创建失败",
+                                "谨慎项「" + t.Name + "」应用前必须确保有系统还原点兜底，但创建失败了：\r\n" + rpNote +
+                                "\r\n\r\n本次应用已取消。请检查系统保护是否开启（系统属性 → 系统保护）后重试。");
+                            SetSubtitle("还原点创建失败，已取消：" + t.Name, Theme.Danger);
+                        });
+                        return;
+                    }
+
                     bool applyOk = false;
                     try { applyOk = t.Apply(); } catch { }
                     Post(delegate
@@ -1275,12 +1297,22 @@ namespace GuyueBox.UI.Views
                 SetSubtitle("批次含谨慎项，正在确认系统还原点…", Theme.Warning);
                 System.Threading.ThreadPool.QueueUserWorkItem(delegate
                 {
-                    string note = EnsureRecentRestorePoint("GuyueBox - 方案同步前");
+                    bool rpOk;
+                    string note = EnsureRecentRestorePoint("GuyueBox - 方案同步前", out rpOk);
                     try
                     {
                         BeginInvoke((MethodInvoker)delegate
                         {
                             if (gen != _loadGen || IsDisposed || Disposing) return;
+                            if (!rpOk)
+                            {
+                                // #22：Risky 项的还原点必须确认创建成功，失败即取消整批应用
+                                SetSubtitle("还原点创建失败，已取消本次方案同步：" + note, Theme.Danger);
+                                Dialog.Warn(this, "还原点创建失败",
+                                    "谨慎项应用前必须确保有系统还原点兜底，但创建失败了：\r\n" + note +
+                                    "\r\n\r\n本次同步已取消。请检查系统保护是否开启（系统属性 → 系统保护）后重试。");
+                                return;
+                            }
                             SetSubtitle(note.Length > 0 ? note + "，开始同步方案…" : "开始同步方案…", Theme.Warning);
                             ImportRunCore(rows, applyCount, revertCount, gen);
                         });
@@ -1292,21 +1324,23 @@ namespace GuyueBox.UI.Views
             ImportRunCore(rows, applyCount, revertCount, gen);
         }
 
-        /// <summary>24 小时内已有还原点则跳过，否则创建一个。返回给用户看的备注（空 = 已有，无需创建）。</summary>
-        private static string EnsureRecentRestorePoint(string title)
+        /// <summary>24 小时内已有还原点则跳过，否则创建一个。
+        /// 返回给用户看的备注；ok=false 表示还原点创建失败（Risky 项应用必须就此取消——#22 校验要求）。</summary>
+        private static string EnsureRecentRestorePoint(string title, out bool ok)
         {
             try
             {
                 List<RestorePoint> points = RestorePoints.List();
                 for (int i = 0; i < points.Count; i++)
                 {
-                    if ((DateTime.Now - points[i].Created).TotalHours < 24) return "";
+                    if ((DateTime.Now - points[i].Created).TotalHours < 24) { ok = true; return ""; }
                 }
             }
             catch { }
             string err;
-            bool ok = RestorePoints.Create(title, out err);
-            if (ok) return "已创建系统还原点";
+            bool created = RestorePoints.Create(title, out err);
+            if (created) { ok = true; return "已创建系统还原点"; }
+            ok = false;
             return string.IsNullOrEmpty(err) ? "还原点创建失败" : err;
         }
 
@@ -1373,14 +1407,14 @@ namespace GuyueBox.UI.Views
         {
             if (_busy) return;
 
-            List<string> ids = TweakLibrary.RecommendedIds();
+            // 单一数据源：与「推荐」筛选一致，直接以 ITweak.Recommended 为准
             List<ITweak> targets = new List<ITweak>();
             for (int i = 0; i < _tweaks.Count; i++)
             {
                 bool applied;
                 if (!_states.TryGetValue(_tweaks[i].Id, out applied)) applied = false;
                 if (applied) continue;
-                if (ids.Contains(_tweaks[i].Id)) targets.Add(_tweaks[i]);
+                if (_tweaks[i].Recommended) targets.Add(_tweaks[i]);
             }
 
             if (targets.Count == 0)

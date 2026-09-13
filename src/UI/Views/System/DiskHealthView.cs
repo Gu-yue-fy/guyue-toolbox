@@ -26,7 +26,7 @@ namespace GuyueBox.UI.Views
 
             _summary.Caption = "磁盘健康";
             _summary.IconKind = "disk";
-            _summary.CaptionColor = Theme.Success;
+            _summary.CaptionColor = Theme.Accent;
 
             _refreshButton = AddAction("重新检测", "refresh", ButtonVariant.Primary,
                 delegate { Load(); }, 116);
@@ -52,7 +52,7 @@ namespace GuyueBox.UI.Views
 
         private void BuildLayout()
         {
-            AddFull(_notice, 42, 16);
+            AddFull(_notice, 34, 12);
 
             FlowLayoutPanel row = MakeRow(0, 16);
             row.Controls.Add(_summary);

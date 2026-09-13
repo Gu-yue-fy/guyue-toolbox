@@ -71,6 +71,19 @@ namespace GuyueBox.Core
                     int a = Convert.ToInt32(cur, CultureInfo.InvariantCulture);
                     return a == (int)Value;
                 }
+                byte[] want = Value as byte[];
+                if (want != null)
+                {
+                    // REG_BINARY 按序列逐字节比较——ToString() 恒为 "System.Byte[]"，字符串比较会让
+                    // "值存在即相等"，导致全新系统上 BINARY 项初始状态误报"已启用"
+                    byte[] have = cur as byte[];
+                    if (have == null || have.Length != want.Length) return false;
+                    for (int i = 0; i < have.Length; i++)
+                    {
+                        if (have[i] != want[i]) return false;
+                    }
+                    return true;
+                }
                 return string.Equals(cur.ToString(), Value == null ? "" : Value.ToString(),
                     StringComparison.OrdinalIgnoreCase);
             }
@@ -80,12 +93,12 @@ namespace GuyueBox.Core
             }
         }
 
-        public void Write(string backupId)
+        /// <summary>执行写入。返回是否真正成功（权限/ACL 拦截时为 false，杜绝"假成功"）。</summary>
+        public bool Write(string backupId)
         {
             if (Delete)
             {
-                RegHelper.DeleteValue(Hive, Path, Name, backupId);
-                return;
+                return RegHelper.DeleteValue(Hive, Path, Name, backupId);
             }
 
             object value = Value;
@@ -95,8 +108,15 @@ namespace GuyueBox.Core
                 int iv;
                 if (int.TryParse(Convert.ToString(value, CultureInfo.InvariantCulture), out iv)) value = iv;
             }
-            RegHelper.SetValue(Hive, Path, Name, value, kind, backupId);
+            if (OnlyIfExists)
+            {
+                return RegHelper.SetValueOnExisting(Hive, Path, Name, value, kind, backupId);
+            }
+            return RegHelper.SetValue(Hive, Path, Name, value, kind, backupId);
         }
+
+        /// <summary>设备实例键专用：只写已存在的实例，避免 CreateSubKey 凭空制造幽灵键。</summary>
+        public bool OnlyIfExists;
     }
 
     /// <summary>
@@ -170,7 +190,7 @@ namespace GuyueBox.Core
             bool ok = true;
             for (int i = 0; i < Enable.Count; i++)
             {
-                try { Enable[i].Write(BackupId); }
+                try { if (!Enable[i].Write(BackupId)) ok = false; }
                 catch { ok = false; }
             }
             return ok;
@@ -183,7 +203,7 @@ namespace GuyueBox.Core
                 bool ok = true;
                 for (int i = 0; i < RevertWrites.Count; i++)
                 {
-                    try { RevertWrites[i].Write(null); }
+                    try { if (!RevertWrites[i].Write(null)) ok = false; }
                     catch { ok = false; }
                 }
                 return ok;

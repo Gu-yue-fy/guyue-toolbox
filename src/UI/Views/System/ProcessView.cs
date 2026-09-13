@@ -160,7 +160,7 @@ namespace GuyueBox.UI.Views
 
         private void BuildLayout()
         {
-            AddFull(_notice, 42, 14);
+            AddFull(_notice, 34, 12);
 
             // ① 状态卡行
             FlowLayoutPanel cards = MakeRowFixed(128, 14);
@@ -478,7 +478,7 @@ namespace GuyueBox.UI.Views
             }
             try
             {
-                Shell.Run("explorer.exe", "/select,\"" + p.Path + "\"", 0);
+                Shell.OpenSelect(p.Path);
             }
             catch
             {

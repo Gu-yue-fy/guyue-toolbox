@@ -34,7 +34,7 @@ namespace GuyueBox.UI.Views
 
             _scanButton = AddAction("开始扫描", "refresh", ButtonVariant.Primary, OnScanClick, 118);
             _cleanButton = AddAction("清理选中项", "trash", ButtonVariant.Danger, OnCleanClick, 150);
-            AddAction("一键清理（推荐项）", "rocket", ButtonVariant.Primary, OnQuickClean, 150);
+            AddAction("一键清理（推荐项）", "bolt", ButtonVariant.Primary, OnQuickClean, 150);
             _toggleButton = AddAction("全选", "check", ButtonVariant.Secondary, OnToggleAllClick, 92);
 
             BuildGrid();
@@ -53,6 +53,7 @@ namespace GuyueBox.UI.Views
             _grid.ReadOnly = false;
             _grid.UseOwnScrollbar = true;
             _grid.Columns.Add(new DarkCheckColumn());
+            _grid.CheckOnRowClick = true;;
             _grid.AddTextColumn("类别", 200, false);
             _grid.AddFillColumn("说明", 240);
             _grid.AddTextColumn("文件数", 90, true);
@@ -72,7 +73,7 @@ namespace GuyueBox.UI.Views
 
         private void BuildLayout()
         {
-            AddFull(_notice, 42, 18);
+            AddFull(_notice, 34, 12);
 
             FlowLayoutPanel row = MakeRow(0, 18);
             row.Controls.Add(_summary);

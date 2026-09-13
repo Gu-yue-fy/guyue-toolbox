@@ -21,10 +21,6 @@ namespace GuyueBox.UI.Views
         public AboutView()
             : base("关于与更新", "查看版本、获取最新版本与项目动态")
         {
-            _notice.NoticeIcon = "info";
-            _notice.NoticeAccent = Theme.Accent;
-            _notice.NoticeText = "本程序完全免费并开放源代码，无任何功能限制。更新数据来自 GitHub Releases。";
-
             AddAction("打开项目主页", "network", ButtonVariant.Ghost, OnOpenProject);
             _checkButton = AddAction("检查更新", "refresh", ButtonVariant.Primary, OnCheckUpdate, 128);
             AddAction("自定义更新源", "doc", ButtonVariant.Ghost, OnSetSource, 140);
@@ -33,11 +29,22 @@ namespace GuyueBox.UI.Views
             _info.IconKind = "info";
             _info.CaptionColor = Theme.Accent;
 
-            AddFull(_notice, 42, 16);
             FlowLayoutPanel row = MakeRow(320, 0);
             row.Controls.Add(_info);
             AddRow(row);
             LoadInfo();
+
+            // 软件概览：让本页不只是版本号，而是完整的能力与规则说明
+            var overview = new InfoList();
+            overview.Caption = "软件概览";
+            overview.IconKind = "feature";
+            overview.CaptionColor = Theme.Accent;
+            overview.Add("功能页面", PageCatalog.All.Count + " 个（概览 / 优化 / 清理 / 系统管理 / 网络 / 设置）");
+            overview.Add("优化项", TweakLibrary.All().Count + " 项，全部支持一键还原");
+            overview.Add("开源协议", "MIT（完全免费，无功能限制、无广告）");
+            overview.Add("更新方式", "GitHub Releases 自动检查，SHA256 校验防篡改");
+            overview.Add("数据安全", "每次修改注册表前自动备份原值");
+            AddFull(overview, 250, 14);
         }
 
         private void LoadInfo()

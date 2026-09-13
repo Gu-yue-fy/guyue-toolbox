@@ -1,8 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Globalization;
-using System.IO;
 using Microsoft.Win32;
 
 namespace GuyueBox.Core
@@ -10,96 +6,6 @@ namespace GuyueBox.Core
     // ===================================================================
     // 通用优化项：用一组注册表写入描述「开启」状态与「还原」状态
     // ===================================================================
-
-    /// <summary>
-    /// 游戏进程高优先级（IFEO）：为选定的游戏 exe 写入 PerfOptions
-    /// CpuPriorityClass=3（高）+ IoPriority=3，系统启动该游戏时自动提权。
-    /// 黑白包「永劫无间优先级」方案的通用化。
-    /// </summary>
-    public sealed class GamePriorityTweak : ITweak
-    {
-        private const string IfeoRoot = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options";
-
-        public string Id { get { return "game_priority_ifeo"; } }
-        public string Group { get { return TweakLibrary.GGame; } }
-        public string Name { get { return "游戏进程高优先级 (IFEO)"; } }
-        public string Description
-        {
-            get { return "选择游戏 exe，通过映像劫持选项让系统启动该游戏时自动赋予高 CPU 优先级与高 IO 优先级，后台任务不再抢占游戏时间片。选错程序也无妨，还原即可移除。"; }
-        }
-        public bool AdminOnly { get { return true; } }
-        public bool Risky { get { return false; } }
-        public bool Recommended { get { return false; } }
-
-        private const string ApplyScript =
-            "Add-Type -AssemblyName System.Windows.Forms\r\n" +
-            "$d = New-Object System.Windows.Forms.OpenFileDialog\r\n" +
-            "$d.Filter = '游戏程序 (*.exe)|*.exe'\r\n" +
-            "$d.Title = 'Select game executable'\r\n" +
-            "if ($d.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { exit 1 }\r\n" +
-            "$n = [IO.Path]::GetFileName($d.FileName)\r\n" +
-            "$k = 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options\\' + $n + '\\PerfOptions'\r\n" +
-            "New-Item -Path $k -Force | Out-Null\r\n" +
-            "Set-ItemProperty -Path $k -Name 'CpuPriorityClass' -Value 3 -Type DWord\r\n" +
-            "Set-ItemProperty -Path $k -Name 'IoPriority' -Value 3 -Type DWord\r\n";
-
-        private const string RevertScript =
-            "$root = 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options'\r\n" +
-            "if (Test-Path $root) { Get-ChildItem $root | Where-Object { Test-Path ($_.PSPath + '\\PerfOptions') } | ForEach-Object { $p = Get-ItemProperty ($_.PSPath + '\\PerfOptions'); if ($p.CpuPriorityClass -eq 3 -and $p.IoPriority -eq 3) { Remove-Item ($_.PSPath + '\\PerfOptions') -Force } } }\r\n";
-
-        private static bool RunScript(string script)
-        {
-            try
-            {
-                string path = System.IO.Path.Combine(
-                    System.IO.Path.GetTempPath(), "guyuebox_gameprio.ps1");
-                System.IO.File.WriteAllText(path, script, new System.Text.UTF8Encoding(true));
-                return Shell.Run("powershell.exe",
-                    "-NoProfile -STA -ExecutionPolicy Bypass -File \"" + path + "\"", 120000).Ok;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        public bool IsApplied()
-        {
-            try
-            {
-                using (RegistryKey root = Registry.LocalMachine.OpenSubKey(IfeoRoot))
-                {
-                    if (root == null) return false;
-                    foreach (string sub in root.GetSubKeyNames())
-                    {
-                        if (!sub.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
-                        using (RegistryKey k = root.OpenSubKey(sub + "\\PerfOptions"))
-                        {
-                            if (k == null) continue;
-                            object cpu = k.GetValue("CpuPriorityClass");
-                            object io = k.GetValue("IoPriority");
-                            if (cpu != null && Convert.ToInt32(cpu) == 3) return true;
-                            if (io != null && Convert.ToInt32(io) == 3) return true;
-                        }
-                    }
-                }
-            }
-            catch
-            {
-            }
-            return false;
-        }
-
-        public bool Apply()
-        {
-            return RunScript(ApplyScript) && IsApplied();
-        }
-
-        public bool Revert()
-        {
-            return RunScript(RevertScript);
-        }
-    }
 
     /// <summary>
     /// 设备类中断优先级：按类 GUID 设置驱动 ISR/DPC 的 BasePriority / OverTargetPriority，

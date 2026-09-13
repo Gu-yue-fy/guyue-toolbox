@@ -104,8 +104,11 @@ namespace GuyueBox.Core
             Func<bool> cancelled, ScanState st, Action<ScanState> onProgress)
         {
             if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) return;
+            // 联接/符号链接防护 + visited 去环：防止把联接目标（目录之外）的文件纳入重复分组
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             Stack<string> dirs = new Stack<string>();
             dirs.Push(root);
+            visited.Add(root.ToUpperInvariant());
             while (dirs.Count > 0)
             {
                 if (cancelled != null && cancelled()) return;
@@ -123,6 +126,9 @@ namespace GuyueBox.Core
                     {
                         foreach (string d in Directory.GetDirectories(dir))
                         {
+                            DirectoryInfo di = new DirectoryInfo(d);
+                            if ((di.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                            if (!visited.Add(d.ToUpperInvariant())) continue;
                             dirs.Push(d);
                         }
                     }

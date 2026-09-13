@@ -1,4 +1,9 @@
-﻿﻿using System;
+﻿/* ============================================================
+ * 文件说明：更新检查：轮询仓库 update.json -> 版本比较 -> 下载校验（SHA256）-> PowerShell 脚本替换本体。
+ * 项目：古月工具包（GuyueBox）
+ * ============================================================ */
+
+﻿using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
@@ -197,6 +202,7 @@ namespace GuyueBox.Core
                 // 供应链安全：update.json 必须提供 SHA256，缺失则拒绝安装（管理员工具被替换的后果严重）
                 if (string.IsNullOrEmpty(info.Sha256))
                 {
+                    try { File.Delete(tmp); } catch { } // 拒绝安装时不残留下载的临时文件
                     error = "更新描述缺少 SHA256 校验值，已拒绝安装（防供应链投毒）。";
                     return false;
                 }
@@ -278,6 +284,19 @@ namespace GuyueBox.Core
                 if (c == '\\' && i + 1 < json.Length)
                 {
                     char n = json[i + 1];
+                    if (n == 'u' && i + 5 < json.Length)
+                    {
+                        // \uXXXX：notes 里的中文经 json 序列化常带此转义
+                        string hex = json.Substring(i + 2, 4);
+                        int code;
+                        if (int.TryParse(hex, System.Globalization.NumberStyles.HexNumber,
+                            CultureInfo.InvariantCulture, out code))
+                        {
+                            sb.Append((char)code);
+                            i += 6;
+                            continue;
+                        }
+                    }
                     if (n == '"' || n == '\\' || n == '/') sb.Append(n);
                     else if (n == 'n') sb.AppendLine();
                     else if (n == 't') sb.Append('\t');

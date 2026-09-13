@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -63,6 +64,67 @@ namespace GuyueBox.UI
     /// <summary>应用深色主题的 DataGridView。</summary>
     public class DarkGrid : DataGridView
     {
+        /// <summary>
+        /// 点行任意位置（名称/说明等列）都切换第 0 列的勾选状态。
+        /// 勾选型列表页开启——不用再精确点中 16px 的小复选框。
+        /// </summary>
+        public bool CheckOnRowClick { get; set; }
+
+        /// <summary>点击列头按该列排序（非绑定表格的手动排序，行 Tag 与勾选值随行保留）。</summary>
+        public bool ColumnClickSort { get; set; }
+
+        private int _sortCol = -1;
+        private bool _sortAsc = true;
+
+        /// <summary>重新应用当前列排序（页面筛选后重建了行时调用，保持用户点选的排序）。</summary>
+        public void ReapplySort()
+        {
+            if (_sortCol >= 0) SortRowsByColumn(_sortCol, _sortAsc);
+        }
+
+        /// <summary>按指定列对当前行排序（字符串比较，纯数字列按数值）。</summary>
+        public void SortRowsByColumn(int col, bool ascending)
+        {
+            if (col < 0 || col >= Columns.Count || Rows.Count == 0) return;
+            int n = Columns.Count;
+            List<object[]> data = new List<object[]>();
+            List<object> tags = new List<object>();
+            foreach (DataGridViewRow r in Rows)
+            {
+                object[] vals = new object[n];
+                for (int i = 0; i < n; i++) vals[i] = r.Cells[i].Value;
+                data.Add(vals);
+                tags.Add(r.Tag);
+            }
+            int dir = ascending ? 1 : -1;
+            data.Sort(delegate(object[] a, object[] b)
+            {
+                object va = a[col], vb = b[col];
+                if (IsNumeric(va) && IsNumeric(vb))
+                {
+                    double da = Convert.ToDouble(va);
+                    double db = Convert.ToDouble(vb);
+                    return da.CompareTo(db) * dir;
+                }
+                string sa = Convert.ToString(va);
+                string sb = Convert.ToString(vb);
+                return string.Compare(sa, sb, StringComparison.OrdinalIgnoreCase) * dir;
+            });
+            Rows.Clear();
+            for (int i = 0; i < data.Count; i++)
+            {
+                int idx = Rows.Add(data[i]);
+                Rows[idx].Tag = tags[i];
+            }
+        }
+
+        private static bool IsNumeric(object o)
+        {
+            return o is sbyte || o is byte || o is short || o is ushort ||
+                   o is int || o is uint || o is long || o is ulong ||
+                   o is float || o is double || o is decimal;
+        }
+
         public DarkGrid()
         {
             // DataGridView 默认关闭双缓冲，反射打开以获得流畅滚动
@@ -92,10 +154,22 @@ namespace GuyueBox.UI
             ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
             ShowCellToolTips = true;
             ShowEditingIcon = false;
-            // 使用系统原生滚动条与滚轮行为
-            ScrollBars = ScrollBars.Both;
+            // 关闭系统原生滚动条：由内置自绘细滚动条负责浏览（见 UseOwnScrollbar）。
+            // 否则原生条会与自绘条在右侧重叠，且会抢占列宽。
+            ScrollBars = ScrollBars.None;
 
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
+
+            // 列头点击排序（ColumnClickSort 开启时在处理器内生效）
+            ColumnHeaderMouseClick += delegate(object sender, DataGridViewCellMouseEventArgs e)
+            {
+                if (!ColumnClickSort) return;
+                int col = e.ColumnIndex;
+                if (col < 0) return;
+                if (col == _sortCol) _sortAsc = !_sortAsc;
+                else { _sortCol = col; _sortAsc = true; }
+                SortRowsByColumn(col, _sortAsc);
+            };
 
             ColumnHeadersDefaultCellStyle.BackColor = Theme.GridHeader;
             ColumnHeadersDefaultCellStyle.ForeColor = Theme.TextMuted;
@@ -141,11 +215,19 @@ namespace GuyueBox.UI
         private int _dragStartY;
         private int _dragStartRow;
 
+        private System.Windows.Forms.Timer _smoothTimer;
+        private int _scrollTarget;
+
         /// <summary>true 时表格高度固定，由内置滚动条负责浏览所有行。</summary>
         public bool UseOwnScrollbar
         {
             get { return _useOwnScrollbar; }
-            set { _useOwnScrollbar = value; Invalidate(); }
+            set
+            {
+                _useOwnScrollbar = value;
+                ScrollBars = value ? ScrollBars.None : ScrollBars.Both;
+                Invalidate();
+            }
         }
 
         private int TotalRows
@@ -188,33 +270,82 @@ namespace GuyueBox.UI
             }
         }
 
-        public void ScrollByWheel(int delta)
+        /// <summary>
+        /// 滚轮滚动表格，采用缓动平滑（与页面 ScrollHost 一致的手感）。
+        /// 返回是否真的能滚动：表格无溢出或已滚到端时返回 false，
+        /// 调用方（WheelRouter）可把这次滚轮让给页面继续滚——整页才能连续流畅滚动。
+        /// </summary>
+        public bool ScrollByWheel(int delta)
         {
-            if (!_useOwnScrollbar) return;
+            if (!_useOwnScrollbar) return false;
 
+            int first;
+            try { first = FirstDisplayedScrollingRowIndex; }
+            catch { return false; }
+
+            int maxFirst = Math.Max(0, TotalRows - VisibleRows);
             int step = Math.Abs(delta) / 40;
             if (step < 1) step = 1;
             if (step > 6) step = 6;
 
-            int first;
-            try { first = FirstDisplayedScrollingRowIndex; }
-            catch { return; }
-
-            int maxFirst = TotalRows - VisibleRows;
-            if (maxFirst < 0) maxFirst = 0;
-
             int target = delta > 0 ? first - step : first + step;
-            if (target < 0) target = 0;
-            if (target > maxFirst) target = maxFirst;
+            target = Math.Max(0, Math.Min(maxFirst, target));
 
-            try
+            bool moved = target != first;
+            if (moved)
             {
-                if (FirstDisplayedScrollingRowIndex != target) FirstDisplayedScrollingRowIndex = target;
+                _scrollTarget = target;
+                EnsureSmoothTimer();
             }
-            catch
+            return moved;
+        }
+
+        /// <summary>首次滚动时创建并启动缓动定时器（帧率 12ms）。</summary>
+        private void EnsureSmoothTimer()
+        {
+            if (_smoothTimer == null)
             {
+                _smoothTimer = new System.Windows.Forms.Timer();
+                _smoothTimer.Interval = 12;
+                _smoothTimer.Tick += delegate { SmoothStep(); };
             }
-            Invalidate();
+            if (!_smoothTimer.Enabled) _smoothTimer.Start();
+        }
+
+        /// <summary>每帧把首行缓动逼近目标（指数插值），消除逐行跳动的生硬感。</summary>
+        private void SmoothStep()
+        {
+            int actual;
+            try { actual = FirstDisplayedScrollingRowIndex; }
+            catch { StopSmoothTimer(); return; }
+
+            double diff = _scrollTarget - actual;
+            if (Math.Abs(diff) < 0.06)
+            {
+                int snap = (int)Math.Round(_scrollTarget);
+                if (actual != snap) { try { FirstDisplayedScrollingRowIndex = snap; } catch { } }
+                StopSmoothTimer();
+                return;
+            }
+            int next = (int)Math.Round(actual + diff * 0.35);
+            if (next != actual) { try { FirstDisplayedScrollingRowIndex = next; } catch { } }
+        }
+
+        private void StopSmoothTimer()
+        {
+            if (_smoothTimer != null) _smoothTimer.Stop();
+        }
+
+        /// <summary>释放缓动定时器（切页销毁控件树后，Win32 定时器若仍触发会访问已释放的行集合）。</summary>
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && _smoothTimer != null)
+            {
+                _smoothTimer.Stop();
+                _smoothTimer.Dispose();
+                _smoothTimer = null;
+            }
+            base.Dispose(disposing);
         }
 
         private void UpdateThumb()
@@ -326,6 +457,26 @@ namespace GuyueBox.UI
                 return;
             }
             base.OnMouseDown(e);
+        }
+
+        /// <summary>CheckOnRowClick 模式：点击行内任意列都切换首列勾选（复选列自身走原生行为）。</summary>
+        protected override void OnCellClick(DataGridViewCellEventArgs e)
+        {
+            base.OnCellClick(e);
+            if (!CheckOnRowClick || e.RowIndex < 0) return;
+            if (e.ColumnIndex == 0) return;                       // 复选列点击已是原生切换
+            if (Columns.Count == 0 || !(Columns[0] is DarkCheckColumn)) return;
+            if (Rows[e.RowIndex].Cells[0].ReadOnly) return;
+
+            bool cur = false;
+            try { cur = Convert.ToBoolean(Rows[e.RowIndex].Cells[0].Value); }
+            catch { }
+
+            Rows[e.RowIndex].Cells[0].Value = !cur;               // 标脏
+            if (IsCurrentCellDirty)
+            {
+                CommitEdit(DataGridViewDataErrorContexts.Commit); // 与点复选框同一条提交路径
+            }
         }
 
         protected override void OnMouseUp(MouseEventArgs e)

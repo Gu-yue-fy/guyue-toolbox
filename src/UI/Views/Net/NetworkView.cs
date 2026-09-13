@@ -19,6 +19,8 @@ namespace GuyueBox.UI.Views
         private readonly StatCard _internetCard = new StatCard();
         private readonly StatCard _dnsCard = new StatCard();
         private readonly InfoList _diag = new InfoList();
+        private readonly InfoList _dnsInfo = new InfoList();
+        private readonly InfoList _mtuInfo = new InfoList();
 
         private readonly DarkGrid _adapterGrid = new DarkGrid();
         private readonly ComboBox _adapterBox = new ComboBox();
@@ -53,9 +55,17 @@ namespace GuyueBox.UI.Views
             _diag.IconKind = "shield";
             _diag.CaptionColor = Theme.Accent;
 
+            _dnsInfo.Caption = "DNS 配置";
+            _dnsInfo.IconKind = "doc";
+            _dnsInfo.CaptionColor = Theme.Cyan;
+            _mtuInfo.Caption = "MTU 与链路";
+            _mtuInfo.IconKind = "network";
+            _mtuInfo.CaptionColor = Theme.Success;
+
             _diagButton = AddAction("开始诊断", "shield", ButtonVariant.Primary, OnDiagClick, 128);
             AddAction("刷新 DNS 缓存", "clean", ButtonVariant.Secondary, delegate { RunRepair("刷新 DNS 缓存", delegate { return NetTools.FlushDns(); }, false); }, 150);
             AddAction("续约 IP 地址", "power", ButtonVariant.Ghost, delegate { RunRepair("续约 IP 地址", delegate { return NetTools.RenewDhcp(); }, false); }, 140);
+            AddAction("清理 ARP 缓存", "refresh", ButtonVariant.Ghost, delegate { RunRepair("清理 ARP 缓存", delegate { return NetTools.ClearArpCache(); }, false); }, 140);
             AddAction("重置 Winsock", "refresh", ButtonVariant.Ghost, delegate { RunRepair("重置 Winsock", delegate { return NetTools.ResetWinsock(); }, true); }, 140);
             AddAction("重置 TCP-IP", "refresh", ButtonVariant.Ghost, delegate { RunRepair("重置 TCP-IP", delegate { return NetTools.ResetTcpIp(); }, true); }, 140);
 
@@ -67,7 +77,7 @@ namespace GuyueBox.UI.Views
 
         private void BuildLayout()
         {
-            AddFull(_notice, 42, 14);
+            AddFull(_notice, 34, 12);
 
             // ① 状态卡行
             FlowLayoutPanel stats = MakeRowFixed(128, 0);
@@ -89,7 +99,13 @@ namespace GuyueBox.UI.Views
             _adapterGrid.AddTextColumn("状态", 80, false);
             AddFull(_adapterGrid, 200, 14);
 
-            // ③ DNS 快切
+            // ③ 网络参数分类信息（DNS 配置 / MTU 与链路）——与系统概览同款信息卡
+            FlowLayoutPanel infoRow = MakeRow(0, 14);
+            infoRow.Controls.Add(_dnsInfo);
+            infoRow.Controls.Add(_mtuInfo);
+            AddRow(infoRow);
+
+            // ④ DNS 快切
             FlowLayoutPanel dnsRow = MakeRow(0, 14);
             dnsRow.Controls.Add(MakeLabel("DNS 切换", 84, true));
             _adapterBox.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -144,23 +160,7 @@ namespace GuyueBox.UI.Views
             _portGrid.AddTextColumn("进程", 200, false);
             AddFull(_portGrid, 190, 0);
 
-            // ⑤ 网络调优（TCP 参数 / ARP 缓存）
-            FlowLayoutPanel tuneRow = MakeRow(0, 10);
-            tuneRow.Controls.Add(MakeLabel("网络调优", 84, true));
-            AccentButton tcpApply = MakeInlineButton("TCP 调优", ButtonVariant.Primary, OnTcpTune, 110);
-            tuneRow.Controls.Add(tcpApply);
-            AccentButton tcpRestore = MakeInlineButton("恢复 TCP 默认", ButtonVariant.Ghost, OnTcpRestore, 130);
-            tuneRow.Controls.Add(tcpRestore);
-            AccentButton arpClear = MakeInlineButton("清理 ARP 缓存", ButtonVariant.Ghost, delegate { RunRepair("清理 ARP 缓存", delegate { return NetTools.ClearArpCache(); }, false); }, 130);
-            tuneRow.Controls.Add(arpClear);
-            AccentButton tcpView = MakeInlineButton("查看 TCP 参数", ButtonVariant.Ghost, OnTcpView, 130);
-            tuneRow.Controls.Add(tcpView);
-            Label tuneTip = MakeLabel("调优开启 ECN/RSS/接收窗口自动调整，适合宽带与游戏", 330, false);
-            tuneTip.Margin = new Padding(12, 8, 0, 0);
-            tuneRow.Controls.Add(tuneTip);
-            AddRow(tuneRow);
-
-            // ⑥ 诊断结果
+            // ⑤ 诊断结果
             FlowLayoutPanel diagRow = MakeRow(0, 14);
             diagRow.Controls.Add(_diag);
             AddRow(diagRow);
@@ -233,6 +233,47 @@ namespace GuyueBox.UI.Views
             for (int i = 0; i < names.Count; i++) _adapterBox.Items.Add(names[i]);
             if (_adapterBox.Items.Count > 0) _adapterBox.SelectedIndex = 0;
             UpdateCurrentDns();
+            RefreshNetworkInfo(adapters);
+        }
+
+        /// <summary>刷新「DNS 配置 / MTU 与链路」分类信息卡（与系统概览同款的信息展示）。</summary>
+        private void RefreshNetworkInfo(List<AdapterInfo> adapters)
+        {
+            // DNS 配置：每个有 IP 的网卡一行
+            _dnsInfo.Clear();
+            for (int i = 0; i < adapters.Count; i++)
+            {
+                AdapterInfo a = adapters[i];
+                if (a.IPv4.Count == 0 && a.Status != "已连接" && a.Status != "Up") continue;
+                string dns = a.Dns.Count > 0 ? string.Join(" / ", a.Dns.ToArray()) : "自动获取 (DHCP)";
+                _dnsInfo.Add(a.Name, dns);
+            }
+            if (adapters.Count == 0) _dnsInfo.Add("网卡", "未检测到");
+            _dnsInfo.Invalidate();
+
+            // MTU 与链路：netsh 的接口 MTU 列表
+            _mtuInfo.Clear();
+            List<KeyValuePair<string, int>> mtus = NetTools.GetMtuList();
+            for (int i = 0; i < mtus.Count; i++)
+            {
+                int mtu = mtus[i].Value;
+                _mtuInfo.Add(mtus[i].Key, mtu + (mtu >= 1500 ? "（标准）" : "（非标准，注意兼容性）"));
+            }
+            if (mtus.Count == 0) _mtuInfo.Add("MTU", "读取失败或无接口");
+            _mtuInfo.Invalidate();
+
+            ResizeInfoCards();
+        }
+
+        /// <summary>信息卡高度按内容自适应（与系统概览一致），行高随最高的卡片。</summary>
+        private void ResizeInfoCards()
+        {
+            int h = Math.Max(140, Math.Max(_dnsInfo.PreferredHeight, _mtuInfo.PreferredHeight));
+            if (_dnsInfo.Height != h) _dnsInfo.Height = h;
+            if (_mtuInfo.Height != h) _mtuInfo.Height = h;
+            Control row = _dnsInfo.Parent;
+            if (row != null && row.Height != h) row.Height = h;
+            RefreshLayout();
         }
 
         private void UpdateCurrentDns()
@@ -463,39 +504,6 @@ namespace GuyueBox.UI.Views
         }
 
         // ---------------- 修复 ----------------
-
-        private void OnTcpTune(object sender, EventArgs e)
-        {
-            if (!Dialog.Confirm(this, "TCP 调优",
-                "将应用以下网络参数优化：\r\n" +
-                "  · 接收窗口自动调整 = normal\r\n  · ECN 拥塞通知 = enabled\r\n" +
-                "  · RSS 接收方缩放 = enabled\r\n  · TCP 时间戳 = disabled\r\n  · TCP 窗口启发式 = disabled\r\n\r\n" +
-                "立即生效，无需重启。是否继续？")) return;
-            RunRepair("TCP 调优", delegate { return NetTools.ApplyTcpTuning(); }, false);
-        }
-
-        private void OnTcpRestore(object sender, EventArgs e)
-        {
-            RunRepair("恢复 TCP 默认", delegate { return NetTools.RestoreTcpDefaults(); }, false);
-        }
-
-        private void OnTcpView(object sender, EventArgs e)
-        {
-            if (_busy) return;
-            _busy = true;
-            SetSubtitle("正在读取 TCP 全局参数…", Theme.Warning);
-            ThreadPool.QueueUserWorkItem(delegate
-            {
-                string text = "";
-                try { text = NetTools.GetTcpGlobal(); } catch (Exception ex) { text = ex.Message; }
-                Post(delegate
-                {
-                    _busy = false;
-                    Dialog.Output(this, "TCP 全局参数（netsh int tcp show global）",
-                        string.IsNullOrEmpty(text) ? "（无输出）" : text);
-                });
-            });
-        }
 
         private void RunRepair(string title, Func<string> action, bool needReboot)
         {

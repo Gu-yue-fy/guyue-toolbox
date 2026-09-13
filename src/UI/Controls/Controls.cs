@@ -1,9 +1,15 @@
-﻿﻿using System;
+﻿/* ============================================================
+ * 文件说明：自绘控件库：按钮/状态卡/提示条/输入框等基础控件（全部 GDI 自绘，无第三方 UI 依赖）。
+ * 项目：古月工具包（GuyueBox）
+ * ============================================================ */
+
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 using GuyueBox.Core;
+using GuyueBox.UI.Views;
 
 namespace GuyueBox.UI
 {
@@ -45,7 +51,13 @@ namespace GuyueBox.UI
         public Color BorderColor
         {
             get { return _borderColor; }
-            set { _borderColor = value; Invalidate(); }
+            set
+            {
+                // 判等后置脏：OnPaint 里回写此属性若每次都 Invalidate 会造成无限重绘
+                if (_borderColor == value) return;
+                _borderColor = value;
+                Invalidate();
+            }
         }
 
         /// <summary>圆角外侧露出的颜色，应设为父容器的背景色。</summary>
@@ -618,19 +630,26 @@ namespace GuyueBox.UI
         }
     }
 
-    /// <summary>主题化的信息提示条。</summary>
+    /// <summary>
+    /// 主题化的信息提示条（紧凑型，20+ 个页面共用）。
+    /// UX 设计：提示默认只占一行（34px），右上角带关闭按钮——用户点关后
+    /// 按所在页面记忆（AppSettings.IsNoticeDismissed），此后不再出现，避免长期挡视野。
+    /// 关闭记忆的 key 自动取宿主页面的类名（向上遍历 Parent 链找 ViewBase），页面无需任何配置。
+    /// </summary>
     public class NoticeBar : RoundPanel
     {
         private string _text = "";
         private Color _accent = Theme.Warning;
         private string _icon = "info";
         private bool _clickable;
+        private bool _hoverClose;          // 鼠标是否悬停在关闭按钮上
+        private bool _memoryChecked;       // 是否已做过"关闭过"检查（防重复）
 
         public NoticeBar()
         {
             BackColor = Theme.CardBg;
             Radius = 9;
-            Height = 42;
+            Height = 34;
             CornerColor = Theme.WindowBg;
             BorderColor = Theme.Border;
             Highlight = false;
@@ -660,6 +679,79 @@ namespace GuyueBox.UI
             set { _clickable = value; Cursor = value ? Cursors.Hand : Cursors.Default; }
         }
 
+        /// <summary>关闭按钮命中区（右上角 14px 方块）。</summary>
+        private Rectangle CloseRect
+        {
+            get { return new Rectangle(Width - 26, (Height - 14) / 2, 14, 14); }
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            CheckDismissedMemory();
+        }
+
+        protected override void OnParentChanged(EventArgs e)
+        {
+            base.OnParentChanged(e);
+            CheckDismissedMemory(); // 行挂载晚于句柄创建时的兜底
+        }
+
+        /// <summary>若用户在此页面关闭过提示：隐藏自身（提示条直挂 Body 时绝不能动 Parent——那会藏掉整个内容区）。</summary>
+        private void CheckDismissedMemory()
+        {
+            if (_memoryChecked) return;
+            _memoryChecked = true;
+            string pageId = FindPageId();
+            if (pageId != null && AppSettings.IsNoticeDismissed(pageId))
+            {
+                Visible = false; // FlowLayoutPanel 会跳过隐藏控件的占位，不留空隙
+            }
+        }
+
+        /// <summary>向上遍历父链找宿主页面（ViewBase），用其类名作关闭记忆 key。</summary>
+        private string FindPageId()
+        {
+            Control c = Parent;
+            while (c != null)
+            {
+                if (c is ViewBase) return c.GetType().Name;
+                c = c.Parent;
+            }
+            return null;
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            if (_hoverClose) { _hoverClose = false; Invalidate(); }
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            bool over = CloseRect.Contains(e.Location);
+            if (over != _hoverClose)
+            {
+                _hoverClose = over;
+                Cursor = over || _clickable ? Cursors.Hand : Cursors.Default;
+                Invalidate();
+            }
+        }
+
+        protected override void OnMouseClick(MouseEventArgs e)
+        {
+            base.OnMouseClick(e);
+            if (e.Button == MouseButtons.Left && CloseRect.Contains(e.Location))
+            {
+                // 只藏自己：提示条可能直接挂在 Body（整个内容容器）上，
+                // 动 Parent 会把整页内容藏掉（"系统概览没了"事故的根因）
+                Visible = false;
+                string pageId = FindPageId();
+                if (pageId != null) AppSettings.MarkNoticeDismissed(pageId); // 永久记忆
+            }
+        }
+
         protected override void OnPaint(PaintEventArgs e)
         {
             BorderColor = Gfx.Alpha(_accent, 70);
@@ -669,15 +761,16 @@ namespace GuyueBox.UI
             Gfx.EnableSmoothing(g);
 
             // 左侧色条
-            using (GraphicsPath p = Gfx.RoundRect(new Rectangle(0, 12, 3, Height - 24), 2))
+            using (GraphicsPath p = Gfx.RoundRect(new Rectangle(0, 10, 3, Height - 20), 2))
             using (SolidBrush b = new SolidBrush(_accent))
             {
                 g.FillPath(b, p);
             }
 
-            IconPainter.Draw(g, _icon, new Rectangle(14, (Height - 15) / 2, 15, 15), _accent);
+            IconPainter.Draw(g, _icon, new Rectangle(12, (Height - 14) / 2, 14, 14), _accent);
 
-            Rectangle textRect = new Rectangle(38, 0, Math.Max(10, Width - 52), Height);
+            // 文本：右侧给关闭按钮留位；小字号 + 省略号截断
+            Rectangle textRect = new Rectangle(34, 0, Math.Max(10, Width - 64), Height);
             using (StringFormat sf = new StringFormat())
             {
                 sf.LineAlignment = StringAlignment.Center;
@@ -685,8 +778,17 @@ namespace GuyueBox.UI
                 sf.FormatFlags = StringFormatFlags.NoWrap;
                 using (SolidBrush b = new SolidBrush(Theme.TextSecondary))
                 {
-                    g.DrawString(_text, Theme.FontBody, b, textRect, sf);
+                    g.DrawString(_text, Theme.FontSmall, b, textRect, sf);
                 }
+            }
+
+            // 右上角关闭按钮（×）：平时淡色，悬停高亮
+            using (Pen p = new Pen(_hoverClose ? Theme.TextPrimary : Gfx.Alpha(Theme.TextMuted, 160), 1.6f))
+            {
+                Rectangle r = CloseRect;
+                int m = 4;
+                g.DrawLine(p, r.Left + m, r.Top + m, r.Right - m, r.Bottom - m);
+                g.DrawLine(p, r.Right - m, r.Top + m, r.Left + m, r.Bottom - m);
             }
         }
     }
@@ -701,7 +803,13 @@ namespace GuyueBox.UI
         public Color AccentColor = Theme.Accent;
         public string FooterText = "";
 
-        private double _shownPercent = -1;   // 进度条当前显示值（向 Percent 缓动）
+        private double _shownPercent = -1;   // 进度条当前显示值
+        private double _percentFrom;         // 进度条动画起点
+        private string _shownMetric;         // 指标文本当前显示值（数字滚动）
+        private double _numFrom, _numTo;     // 数字滚动起止
+        private string _numSuffix = "";      // 数字后缀（%、ms、GB 等）
+        private bool _barAnim, _numAnim;
+        private float _animPos;
         private System.Windows.Forms.Timer _anim;
 
         public StatCard()
@@ -714,15 +822,30 @@ namespace GuyueBox.UI
         public void SetData(string caption, string metric, double percent, string footer, Color accent)
         {
             CaptionText = caption;
+            string oldShown = _shownMetric ?? MetricText;
             MetricText = metric;
             Percent = percent;
             FooterText = footer;
             AccentColor = accent;
             StartBarAnim();
+            StartNumAnim(oldShown, metric);
             Invalidate();
         }
 
-        /// <summary>进度条从当前显示值缓动到目标值（关闭动画或首帧则直接到位）。</summary>
+        /// <summary>拆出前导数字与后缀（如 "45 %" → 45 / " %"）；无前导数字返回 false。</summary>
+        private static bool TrySplit(string text, out double num, out string suffix)
+        {
+            num = 0; suffix = "";
+            if (string.IsNullOrEmpty(text)) return false;
+            System.Text.RegularExpressions.Match m =
+                System.Text.RegularExpressions.Regex.Match(text, @"^\s*(-?\d+(?:\.\d+)?)\s*(.*)$");
+            if (!m.Success) return false;
+            bool ok = double.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out num);
+            suffix = m.Groups[2].Value;
+            return ok;
+        }
+
         private void StartBarAnim()
         {
             if (!AppSettings.Animations || Percent < 0 || _shownPercent < 0 ||
@@ -731,22 +854,56 @@ namespace GuyueBox.UI
                 _shownPercent = Percent;
                 return;
             }
+            _percentFrom = _shownPercent;
+            _barAnim = true;
+            StartCardAnim();
+        }
+
+        /// <summary>指标数字滚动：旧值 → 新值插值，后缀保持。</summary>
+        private void StartNumAnim(string oldShown, string target)
+        {
+            double a, b; string aSuf, bSuf;
+            bool oldNum = TrySplit(oldShown ?? "", out a, out aSuf);
+            bool newNum = TrySplit(target ?? "", out b, out bSuf);
+            if (!AppSettings.Animations || !oldNum || !newNum || Math.Abs(a - b) < 0.01)
+            {
+                _shownMetric = target;
+                _numAnim = false;
+                return;
+            }
+            _numFrom = a; _numTo = b; _numSuffix = bSuf;
+            _shownMetric = a.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + bSuf;
+            _numAnim = true;
+            StartCardAnim();
+        }
+
+        /// <summary>统一动画钟：进度条与数字滚动共用一条 EaseOutCubic 时间线。</summary>
+        private void StartCardAnim()
+        {
             if (_anim == null)
             {
                 _anim = new System.Windows.Forms.Timer { Interval = 16 };
                 _anim.Tick += delegate
                 {
-                    double diff = Percent - _shownPercent;
-                    if (Math.Abs(diff) < 0.6)
+                    _animPos += 0.14f;
+                    bool done = _animPos >= 1f;
+                    if (done) _animPos = 1f;
+                    float t = 1f - (1f - _animPos) * (1f - _animPos) * (1f - _animPos); // EaseOutCubic
+
+                    if (_barAnim)
                     {
-                        _shownPercent = Percent;
-                        _anim.Stop();
+                        _shownPercent = _percentFrom + (Percent - _percentFrom) * t;
+                        if (done) _barAnim = false;
                     }
-                    else
+                    if (_numAnim)
                     {
-                        _shownPercent += diff * 0.25; // 指数缓动
+                        double cur = _numFrom + (_numTo - _numFrom) * t;
+                        _shownMetric = cur.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + _numSuffix;
+                        if (done) _numAnim = false;
                     }
+
                     Invalidate();
+                    if (done && !_barAnim && !_numAnim) _anim.Stop();
                 };
             }
             _anim.Start();
