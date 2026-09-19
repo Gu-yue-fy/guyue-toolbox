@@ -1,5 +1,5 @@
 ﻿<#
-    System Optimization Toolbox - build script
+    古月工具包（GuyueBox）- build script
     Uses the C# compiler shipped with .NET Framework (csc.exe).
     No .NET SDK required.
 
@@ -20,26 +20,48 @@ $outFile  = Join-Path $binDir 'GuyueBox.exe'
 $manifest = Join-Path $srcDir 'app.manifest'
 
 Write-Host ''
-Write-Host '=== System Optimization Toolbox - Build ===' -ForegroundColor Cyan
+Write-Host '=== 古月工具包（GuyueBox）- Build ===' -ForegroundColor Cyan
 
 # ---------- 1. locate compiler ----------
-$candidates = @(
-    (Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'),
-    (Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe')
-)
+# 优先 Roslyn（tools\roslyn\csc.exe，由 tools\install-roslyn.ps1 一次性安装），
+# 以启用现代 C#（字符串插值 / 空条件 / 模式匹配 / 记录等）；
+# 未安装时回退到 .NET Framework 自带编译器（仅支持 C# 5）。
+$roslynCsc = Join-Path $root 'tools\roslyn\csc.exe'
+$useRoslyn = Test-Path -LiteralPath $roslynCsc
 
 $csc = $null
-foreach ($c in $candidates) {
-    if (Test-Path -LiteralPath $c) { $csc = $c; break }
+if ($useRoslyn) {
+    $csc = $roslynCsc
+}
+else {
+    $candidates = @(
+        (Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'),
+        (Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe')
+    )
+    foreach ($c in $candidates) {
+        if (Test-Path -LiteralPath $c) { $csc = $c; break }
+    }
 }
 
 if (-not $csc) {
-    Write-Host 'csc.exe not found. Please make sure .NET Framework 4.x is installed.' -ForegroundColor Red
+    Write-Host 'csc.exe not found. Run tools\install-roslyn.ps1 or install .NET Framework 4.x.' -ForegroundColor Red
     exit 1
 }
 
-$fxDir = Split-Path -Parent $csc
-Write-Host ('compiler : ' + $csc) -ForegroundColor DarkGray
+# 引用程序集目录：framework csc 本身就在框架目录里，取其所在目录即可；
+# Roslyn 独立安装，必须显式指向 .NET Framework 目录才能找到 System.dll 等引用
+if ($useRoslyn) {
+    $fxDir = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
+    if (-not (Test-Path -LiteralPath $fxDir)) {
+        $fxDir = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319'
+    }
+}
+else {
+    $fxDir = Split-Path -Parent $csc
+}
+
+$compilerTag = if ($useRoslyn) { '  (Roslyn, modern C#)' } else { '  (legacy, C# 5)' }
+Write-Host ('compiler : ' + $csc + $compilerTag) -ForegroundColor DarkGray
 
 # ---------- 2. collect sources ----------
 $sources = @(Get-ChildItem -LiteralPath $srcDir -Recurse -Filter '*.cs' |
@@ -87,7 +109,7 @@ $iconFile = Join-Path $srcDir 'Assets\app.ico'
 if (Test-Path -LiteralPath $iconFile) {
     $cscArgs += ('/win32icon:' + [char]34 + $iconFile + [char]34)
 }
-$cscArgs += '/langversion:5'
+if ($useRoslyn) { $cscArgs += '/langversion:latest' } else { $cscArgs += '/langversion:5' }
 $cscArgs += '/optimize+'
 $cscArgs += '/warn:4'
 # 65001 = UTF-8, so Chinese literals in sources are read correctly
@@ -118,6 +140,85 @@ Write-Host ('elapsed  : ' + [math]::Round($sw.Elapsed.TotalSeconds, 2) + ' s') -
 if (Test-Path -LiteralPath $outFile) {
     $size = (Get-Item -LiteralPath $outFile).Length
     Write-Host ('size     : ' + [math]::Round($size / 1KB, 1) + ' KB') -ForegroundColor DarkGray
+}
+
+# ---------- 5a. version consistency ----------
+# 版本号唯一来源是 src\AppInfo.cs；这里校验它与发版清单 update.json 是否一致。
+# 不一致只警告不阻断（开发途中允许 update.json 暂时落后于代码），
+# 但它能拦住"改了代码版本却忘了重新生成 update.json"这类发布事故。
+$infoFile = Join-Path $srcDir 'AppInfo.cs'
+$updFile  = Join-Path $root 'update.json'
+$codeVer  = $null
+if (Test-Path -LiteralPath $infoFile) {
+    if ((Get-Content -LiteralPath $infoFile -Raw) -match 'Version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"') { $codeVer = $Matches[1] }
+}
+$jsonVer = $null
+if (Test-Path -LiteralPath $updFile) {
+    if ((Get-Content -LiteralPath $updFile -Raw) -match '"version"\s*:\s*"([^"]+)"') { $jsonVer = $Matches[1] }
+}
+if ($codeVer -and $jsonVer -and ($codeVer -ne $jsonVer)) {
+    Write-Host ('version  : MISMATCH  code=' + $codeVer + '  update.json=' + $jsonVer) -ForegroundColor Yellow
+    Write-Host '           run: powershell -File tools\make-update-json.ps1 -Version <new> -Notes "..."' -ForegroundColor Yellow
+}
+elseif ($codeVer) {
+    # 注意：PowerShell 不允许 (if ...) 直接当表达式用（会报 "if 不是 cmdlet"），
+    # 必须先赋值再拼接
+    $tail = if ($jsonVer) { ' (AppInfo.cs = update.json)' } else { ' (AppInfo.cs)' }
+    Write-Host ('version  : ' + $codeVer + $tail) -ForegroundColor DarkGray
+}
+
+# ---------- 5b. tweak packs ----------
+# 仓库根目录 packs\*.json 是外部优化包清单示例/内置包，复制到 bin\packs 供程序启动时装载
+$packSrc = Join-Path $root 'packs'
+if (Test-Path -LiteralPath $packSrc) {
+    $packDst = Join-Path $binDir 'packs'
+    if (-not (Test-Path -LiteralPath $packDst)) {
+        New-Item -ItemType Directory -Path $packDst | Out-Null
+    }
+    $packFiles = @(Get-ChildItem -LiteralPath $packSrc -Filter '*.json' -ErrorAction SilentlyContinue |
+                   Where-Object { -not $_.PSIsContainer })
+    foreach ($pf in $packFiles) {
+        Copy-Item -LiteralPath $pf.FullName -Destination $packDst -Force
+    }
+
+    # 清理源目录里已不存在的旧包：否则删掉或改名的包会残留在 bin\packs，
+    # 程序启动时仍会装载它——表现为"已经删掉的包还在生效"。
+    $keep = @{}
+    foreach ($pf in $packFiles) { $keep[$pf.Name] = $true }
+    $stale = @(Get-ChildItem -LiteralPath $packDst -Filter '*.json' -ErrorAction SilentlyContinue |
+               Where-Object { -not $_.PSIsContainer -and -not $keep.ContainsKey($_.Name) })
+    foreach ($sf in $stale) { Remove-Item -LiteralPath $sf.FullName -Force -ErrorAction SilentlyContinue }
+
+    if ($packFiles.Count -gt 0) {
+        Write-Host ('packs    : ' + $packFiles.Count + ' file(s) -> bin\packs' +
+            $(if ($stale.Count -gt 0) { ' (removed ' + $stale.Count + ' stale)' } else { '' })) -ForegroundColor DarkGray
+    }
+}
+
+# ---------- 5c. 优化项目录自检（护栏） ----------
+# 借鉴宇奇引擎的架构护栏测试：把「优化项 Id 重复 / 两个项撞同一个注册表值 /
+# 优化项无法还原」这类问题变成构建期可发现的问题。
+# 程序清单声明 requireAdministrator，因此只在**已经提权**时自动跑（不会再弹 UAC 打断构建）；
+# 未提权时跳过，可自行运行 GuyueBox.exe --selftest 查看。
+$isAdmin = (New-Object Security.Principal.WindowsPrincipal(
+    [Security.Principal.WindowsIdentity]::GetCurrent())
+).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+if ($isAdmin) {
+    $selfTestLog = Join-Path $binDir 'selftest.log'
+    if (Test-Path -LiteralPath $selfTestLog) { Remove-Item -LiteralPath $selfTestLog -Force }
+    $st = Start-Process -FilePath $outFile -ArgumentList '--selftest' -Wait -PassThru -WindowStyle Hidden
+    $stText = if (Test-Path -LiteralPath $selfTestLog) { Get-Content -LiteralPath $selfTestLog -Raw } else { '(未生成日志)' }
+    if ($st.ExitCode -ne 0) {
+        Write-Host ''
+        Write-Host $stText
+        Write-Host 'SELFTEST FAILED' -ForegroundColor Red
+        exit 1
+    }
+    Write-Host ('selftest  : PASS') -ForegroundColor Green
+}
+else {
+    Write-Host 'selftest  : skipped (需要管理员权限；可手动运行 GuyueBox.exe --selftest)' -ForegroundColor DarkGray
 }
 
 # ---------- 6. run ----------

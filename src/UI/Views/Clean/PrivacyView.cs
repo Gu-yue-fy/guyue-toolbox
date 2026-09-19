@@ -254,9 +254,11 @@ namespace GuyueBox.UI.Views
                 if (targets[i].Scanned) traces += targets[i].Count;
             }
 
-            if (!Dialog.Confirm(this, "确认清理",
-                "即将清除 " + targets.Count + " 项使用痕迹（共 " + traces + " 条记录）。\r\n\r\n" +
-                "这些记录删除后无法恢复，但不影响系统与程序功能。是否继续？"))
+            if (!Dialog.ConfirmDanger(this, "清理使用痕迹",
+                "清除 " + targets.Count + " 个类别共 " + traces + " 条使用记录。",
+                "不可撤销：记录删除后无法找回。",
+                "只影响浏览器/系统的历史痕迹，不影响系统与程序功能，也不涉及个人文件。",
+                "开始清理", true))
             {
                 return;
             }
@@ -323,20 +325,5 @@ namespace GuyueBox.UI.Views
                 if (_grid.Rows[i].Tag == it) return i;
             }
             return -1;
-        }
-
-        private void Post(ThreadStart action)
-        {
-            try
-            {
-                if (IsHandleCreated && !IsDisposed)
-                {
-                    BeginInvoke((MethodInvoker)delegate { action(); });
-                }
-            }
-            catch
-            {
-            }
-        }
-    }
+        }    }
 }

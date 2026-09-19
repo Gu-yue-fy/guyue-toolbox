@@ -5,6 +5,9 @@ obj/
 # 探针截图（运行时产物）
 bin/probe/
 
+# 界面自查截图（验证时临时产生，非发布素材；docs/pages 等正式预览图不忽略）
+docs/check/
+
 # 运行时生成的临时文件
 *.tmp
 *.log
@@ -13,3 +16,8 @@ tools/_fullprobe.txt
 tools/_uilint*.txt
 tools/_audit.txt
 tools/_tweak*.txt
+
+# Roslyn 编译器与 NuGet 工具（tools\install-roslyn.ps1 按需下载，不入库）
+tools/roslyn/
+tools/roslyn_pkg/
+tools/nuget.exe

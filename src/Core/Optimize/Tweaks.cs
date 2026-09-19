@@ -42,6 +42,7 @@ namespace GuyueBox.Core
         public const string GNetwork = "网络优化";
         public const string GSlim = "系统精简";
         public const string GExtreme = "极限性能";
+        public const string GAudio = "音频优化";
 
         private const string CplDesktop = @"Control Panel\Desktop";
         private const string CplDWM = @"Control Panel\Desktop\WindowMetrics";
@@ -49,6 +50,8 @@ namespace GuyueBox.Core
         private const string ExplorerMain = @"Software\Microsoft\Windows\CurrentVersion\Explorer";
 
         private static List<ITweak> _allCache;
+        // 扩展 Provider 注册表：内置应用当前未注册任何外部 Provider（ITweakProvider 是面向第三方的扩展点），
+        // 在首次访问 All() 之前调用 RegisterProvider 即可让扩展项自动接入优化中心/推荐/方案库。
         private static readonly List<ITweakProvider> _providers = new List<ITweakProvider>();
 
         /// <summary>
@@ -76,23 +79,31 @@ namespace GuyueBox.Core
             list.AddRange(Appearance());
             list.AddRange(Services());
             list.AddRange(Extreme());
+            list.AddRange(Tasks());    // 任务调度：16 个计划任务 → 4 个批量开关
+            list.AddRange(Consent());  // 隐私授权：14 个 ConsentStore 权限 → 1 个批量开关
+            list.AddRange(Audio());    // 音频优化：4 项
+            list.AddRange(Enhanced()); // 增强项：高价值单点（独显/防误触/长路径/剪贴板/还原点/网卡卸载）
+            list.AddRange(PowerModel()); // 进阶项：CPU 电源模型（仅插电档）+ NetBIOS + Edge 游戏助手
+            list.AddRange(Extras());     // 补充项：资源管理器 / 任务栏体验项（HKCU，无需管理员，可还原）
             for (int i = 0; i < _providers.Count; i++)
             {
                 list.AddRange(_providers[i].Provide());
             }
-            _allCache = list;
-            return list;
-        }
 
-        public static List<string> RecommendedIds()
-        {
-            return new List<string>(new string[]
+            // Id 全库唯一护栏：内置项优先，扩展 Provider / 优化包中的重复 Id 一律丢弃
+            // （外部包不得靠重名覆盖内置项的行为，也不得互相覆盖）。
+            HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            List<ITweak> unique = new List<ITweak>(list.Count);
+            for (int i = 0; i < list.Count; i++)
             {
-                "menu_anim", "visual_fx", "startup_delay_zero",
-                "show_file_ext", "disable_shake",
-                "ad_id_off", "copilot_off", "bing_search_off",
-                "svc_DiagTrack", "svc_dmwappushservice", "svc_RemoteRegistry"
-            });
+                ITweak t = list[i];
+                if (t == null || string.IsNullOrEmpty(t.Id)) continue;
+                if (!seen.Add(t.Id)) continue;
+                unique.Add(t);
+            }
+
+            _allCache = unique;
+            return unique;
         }
 
         /// <summary>

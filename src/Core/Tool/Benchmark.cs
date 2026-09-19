@@ -123,12 +123,6 @@ namespace GuyueBox.Core
             return r;
         }
 
-        /// <summary>轻量单核探测（供测试用，约 300ms）。</summary>
-        public static double QuickCpuProbe()
-        {
-            return CpuSingle(300);
-        }
-
         private static double CpuSingle(int ms)
         {
             DoWork(20000);

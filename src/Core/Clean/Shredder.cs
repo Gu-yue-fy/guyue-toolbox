@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
+using System.Threading.Tasks;
 
 namespace GuyueBox.Core
 {
@@ -30,7 +31,10 @@ namespace GuyueBox.Core
             try
             {
                 if (File.Exists(path)) return new FileInfo(path).Length;
-                if (Directory.Exists(path)) return MeasureDir(path);
+                // 联接 / 符号链接必须在这里拦掉：Directory.Exists 会穿透到目标，
+                // 但 Shred 对联接只删链接本身（SkippedDirs++、释放 0 字节）。
+                // 不拦截的话，列表会显示目标体积（可能几十 GB），实际却粉碎 0 字节
+                if (Directory.Exists(path) && !IsReparseDir(path)) return MeasureDir(path);
             }
             catch
             {
@@ -55,11 +59,21 @@ namespace GuyueBox.Core
             try
             {
                 string[] files = Directory.GetFiles(dir);
-                for (int i = 0; i < files.Length; i++)
-                {
-                    try { total += new FileInfo(files[i]).Length; }
-                    catch { }
-                }
+                object gate = new object();
+
+                // 并行统计本目录直属文件：每个文件都是一次独立的元数据查询
+                // 只并行「文件」不并行「子目录」，避免递归时嵌套并行导致并行度爆炸
+                Parallel.For(0, files.Length,
+                    new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount },
+                    () => 0L,
+                    (i, state, local) =>
+                    {
+                        try { local += new FileInfo(files[i]).Length; }
+                        catch { }
+                        return local;
+                    },
+                    delegate(long local) { lock (gate) { total += local; } });
+
                 string[] sub = Directory.GetDirectories(dir);
                 for (int i = 0; i < sub.Length; i++)
                 {
@@ -121,8 +135,19 @@ namespace GuyueBox.Core
             try
             {
                 string[] files = Directory.GetFiles(dir);
-                for (int i = 0; i < files.Length; i++) ShredFile(files[i], passes, result);
+                object gate = new object();
 
+                // 粉碎是 IO + CPU 双密集（每个 pass 都要重写整个文件），
+                // 同一目录内的文件彼此独立，并行可显著缩短总耗时。
+                // 结果用「每线程本地累加 + 结束合并」，避免逐文件加锁竞争。
+                Parallel.For(0, files.Length,
+                    new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount },
+                    () => new ShredResult(),
+                    (i, state, local) => { ShredFile(files[i], passes, local); return local; },
+                    delegate(ShredResult local) { lock (gate) { Merge(result, local); } });
+
+                // 子目录仍串行递归：visited 防环集合不是线程安全的，
+                // 且嵌套并行会在深层目录树上造成并行度爆炸
                 string[] sub = Directory.GetDirectories(dir);
                 for (int i = 0; i < sub.Length; i++) ShredDir(sub[i], passes, result, visited);
 
@@ -134,6 +159,16 @@ namespace GuyueBox.Core
                 result.Errors++;
                 result.ErrorMessages.Add(dir + "：" + ex.Message);
             }
+        }
+
+        /// <summary>把并行粉碎的本地结果合并进总结果（锁内一次性汇入）。</summary>
+        private static void Merge(ShredResult target, ShredResult local)
+        {
+            target.Bytes += local.Bytes;
+            target.Files += local.Files;
+            target.Errors += local.Errors;
+            target.SkippedDirs += local.SkippedDirs;
+            if (local.ErrorMessages.Count > 0) target.ErrorMessages.AddRange(local.ErrorMessages);
         }
 
         private static void ShredFile(string path, int passes, ShredResult result)

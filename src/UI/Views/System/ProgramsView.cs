@@ -103,6 +103,7 @@ namespace GuyueBox.UI.Views
             _search.ForeColor = Theme.TextPrimary;
             _search.Font = Theme.FontBody;
             _search.SetBounds(30, 0, 200, 32);
+            Native.SetCue(_search, "搜索软件…");
             _search.TextChanged += delegate { ApplyFilter(); };
             _searchWrap.Controls.Add(_search);
 
@@ -111,7 +112,7 @@ namespace GuyueBox.UI.Views
             _incUpdates.ForeColor = Theme.TextSecondary;
             _incUpdates.Font = Theme.FontSmall;
             _incUpdates.Text = "包含更新/系统组件";
-            _incUpdates.CheckedChanged += delegate { Load(true); };
+            _incUpdates.CheckedChanged += delegate { Load(); };
 
             _countLabel.AutoSize = true;
             _countLabel.ForeColor = Theme.TextMuted;
@@ -127,8 +128,7 @@ namespace GuyueBox.UI.Views
             {
                 _searchWrap.SetBounds(0, 1, 240, 32);
                 _incUpdates.SetBounds(252, 6, _incUpdates.Width, 24);
-                _countLabel.SetBounds(Math.Max(420, _toolbar.Width - _countLabel.Width - 4), 6,
-                    _countLabel.Width, 24);
+                LayoutRightLabel(_countLabel, _toolbar.Width, 400, 6, 24);
             };
         }
 
@@ -162,15 +162,12 @@ namespace GuyueBox.UI.Views
             _wingetId.Font = Theme.FontBody;
             _wingetId.Size = new Size(170, 30);
             wingetRow.Controls.Add(_wingetId);
+            Native.SetCue(_wingetId, "如 VideoLAN.VLC");
             AccentButton custom = MakeInlineWingetButton("安装自定义", OnWingetCustom, 124);
             wingetRow.Controls.Add(custom);
-            Label tip = new Label();
-            tip.Text = "静默安装，进度见页头提示";
-            tip.ForeColor = Theme.TextMuted;
-            tip.Font = Theme.FontSmall;
-            tip.Size = new Size(190, 30);
-            tip.Margin = new Padding(12, 8, 0, 0);
-            wingetRow.Controls.Add(tip);
+            // 本行不放「静默安装，进度见页头提示」一类说明标签：190px + 间距会把本行
+            // 撑到 984px，而最小窗口的内容区仅 807px，最右控件会被裁掉。
+            // 进度信息由页头提示承载，这里只保留功能控件。
             AddRow(wingetRow);
 
             AddFull(_grid, 320, 0);
@@ -235,11 +232,11 @@ namespace GuyueBox.UI.Views
                 {
                     _busy = false;
                     _wingetInstall.Enabled = true;
-                    bool ok = r.Ok && r.All.IndexOf("0x8", StringComparison.Ordinal) < 0;
+                    bool ok = r.Ok; // 以 winget 进程退出码为准，避免对输出文本做脆弱的关键字匹配
                     if (ok)
                     {
                         SetSubtitle(title + " 安装完成。", Theme.Success);
-                        Load(false); // 刷新已安装列表
+                        Load(); // 刷新已安装列表
                     }
                     else
                     {
@@ -264,30 +261,19 @@ namespace GuyueBox.UI.Views
 
         private void Relayout()
         {
-            int summaryH = _summary.PreferredHeight;
-            _summary.Height = summaryH;
-            Control row = _summary.Parent;
-            if (row != null) row.Height = summaryH;
-
-            int used = Body.Padding.Top + Body.Padding.Bottom + 42 + 18 + summaryH + 18 + 34 + 18;
-            int avail = ViewportHeight - used;
-            if (avail < 220) avail = 220;
-
-            if (_grid.Height != avail) _grid.Height = avail;
-            _grid.Invalidate();
-            RefreshLayout();
+            LayoutGrid(_grid, _summary, 52, 220); // 52 = 搜索行（34 + 18）
         }
 
         public override void OnActivated()
         {
-            if (!_loaded) Load(false);
+            if (!_loaded) Load();
         }
 
         // --------------------------------------------------------------
         // 数据
         // --------------------------------------------------------------
 
-        private void Load(bool force)
+        private void Load()
         {
             if (_busy) return;
             _busy = true;
@@ -362,8 +348,7 @@ namespace GuyueBox.UI.Views
             _grid.ReapplySort();
 
             _countLabel.Text = "显示 " + shown.Count + " / " + _all.Count + " 项";
-            _countLabel.SetBounds(Math.Max(420, _toolbar.Width - _countLabel.Width - 4), 6,
-                _countLabel.Width, 24);
+            LayoutRightLabel(_countLabel, _toolbar.Width, 400, 6, 24);
             _countLabel.Invalidate();
             UpdateActions();
         }
@@ -382,7 +367,7 @@ namespace GuyueBox.UI.Views
 
         private void OnRefreshClick(object sender, EventArgs e)
         {
-            Load(true);
+            Load();
         }
 
         private void OnOpenClick(object sender, EventArgs e)
@@ -419,10 +404,12 @@ namespace GuyueBox.UI.Views
             ProgramEntry entry = _grid.SelectedRows[0].Tag as ProgramEntry;
             if (entry == null) return;
 
-            string msg = "即将启动「" + entry.Name + "」的卸载程序。\n\n" +
-                "· 卸载过程由系统/软件自身的安装程序完成，可能需要管理员权限（UAC 确认）；\n" +
-                "· 卸载完成后请点击「刷新」重新读取列表。\n\n是否继续？";
-            if (!Dialog.Confirm(this, "卸载程序", msg)) return;
+            if (!Dialog.ConfirmDanger(this, "卸载程序",
+                "启动「" + entry.Name + "」的卸载程序（由软件自身的安装程序执行）。",
+                "取决于该软件：多数可在卸载过程中取消，取消后不留改动。",
+                "可能需要 UAC 确认；卸载完成后请点「刷新」重新读取列表。",
+                "启动卸载", false))
+                return;
 
             bool ok = Programs.LaunchUninstall(entry, false);
             if (ok)
@@ -484,7 +471,7 @@ namespace GuyueBox.UI.Views
                 sb.Append("· 删除快捷方式：").Append(plan.Files[i]).Append("\r\n");
             for (int i = 0; i < plan.RegistryKeys.Count; i++)
                 sb.Append("· 删除注册表：").Append(plan.RegistryKeys[i]).Append("\r\n");
-            sb.Append("\r\n注意：删除不可恢复，请确认以上内容都属于该软件。");
+            sb.Append("\r\n以上即本次将执行的全部动作，请逐行确认它们都属于该软件。");
 
             if (plan.Processes.Count == 0 && plan.Folders.Count == 0 && plan.Files.Count == 0 &&
                 plan.RegistryKeys.Count == 0)
@@ -493,7 +480,12 @@ namespace GuyueBox.UI.Views
                 return;
             }
 
-            if (!Dialog.Confirm(this, "强制卸载（不可恢复）", sb.ToString())) return;
+            if (!Dialog.ConfirmDanger(this, "强制卸载",
+                "对「" + entry.Name + "」执行强制清理（动作清单见下方影响范围）。",
+                "不可恢复：目录与注册表删除后无法找回，本工具不做备份。",
+                sb.ToString() +
+                "\r\n仅当正常卸载不可用或存在卸载残留时使用。",
+                "强制卸载", true)) return;
 
             _busy = true;
             UpdateActions();
@@ -509,7 +501,7 @@ namespace GuyueBox.UI.Views
                 {
                     _busy = false;
                     UpdateActions();
-                    Load(true); // 刷新列表
+                    Load(); // 刷新列表
                     if (errors.Count > 0)
                     {
                         string text = report + "\r\n\r\n以下项目未能清理（多为文件被占用或权限不足）：\r\n";
@@ -544,26 +536,9 @@ namespace GuyueBox.UI.Views
         {
             Graphics g = e.Graphics;
             Gfx.EnableSmoothing(g);
-            using (Pen p = new Pen(Theme.BorderStrong, 1f))
-            {
-                Gfx.StrokeRound(g, new Rectangle(0, 0, _searchWrap.Width - 1, _searchWrap.Height - 1), 6,
-                    Theme.BorderStrong, 1f);
-            }
+            // Gfx.StrokeRound 内部已走 GdiCache.Pen，此处不要再自行 new Pen
+            Gfx.StrokeRound(g, new Rectangle(0, 0, _searchWrap.Width - 1, _searchWrap.Height - 1), 6,
+                Theme.BorderStrong, 1f);
             IconPainter.Draw(g, "search", new Rectangle(9, 8, 16, 16), Theme.TextMuted);
-        }
-
-        private void Post(System.Threading.ThreadStart action)
-        {
-            try
-            {
-                if (IsHandleCreated && !IsDisposed)
-                {
-                    BeginInvoke((MethodInvoker)delegate { action(); });
-                }
-            }
-            catch
-            {
-            }
-        }
-    }
+        }    }
 }

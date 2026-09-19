@@ -83,18 +83,7 @@ namespace GuyueBox.UI.Views
 
         private void Relayout()
         {
-            int summaryH = _summary.PreferredHeight;
-            _summary.Height = summaryH;
-            Control row = _summary.Parent;
-            if (row != null) row.Height = summaryH;
-
-            int used = Body.Padding.Top + Body.Padding.Bottom + 42 + 18 + summaryH + 18;
-            int avail = ViewportHeight - used;
-            if (avail < 200) avail = 200;
-
-            if (_grid.Height != avail) _grid.Height = avail;
-            _grid.Invalidate();
-            RefreshLayout();
+            LayoutGrid(_grid, _summary, 0, 200);
         }
 
         public override void OnActivated()
@@ -155,11 +144,7 @@ namespace GuyueBox.UI.Views
 
         private ScheduledTask Selected
         {
-            get
-            {
-                if (_grid.SelectedRows.Count == 0) return null;
-                return _grid.SelectedRows[0].Tag as ScheduledTask;
-            }
+            get { return SelectedFrom<ScheduledTask>(_grid); }
         }
 
         private void UpdateActions()
@@ -173,7 +158,11 @@ namespace GuyueBox.UI.Views
         {
             ScheduledTask t = Selected;
             if (t == null || !t.Enabled) return;
-            if (!Dialog.Confirm(this, "禁用任务", "确定要禁用计划任务「" + t.Name + "」吗？\r\n（可随时启用还原）"))
+            if (!Dialog.ConfirmDanger(this, "禁用计划任务",
+                "禁用计划任务「" + t.Name + "」，它不再按计划自动运行。",
+                "可撤销：可随时重新启用，原计划定义不会被删除。",
+                "若该任务属于系统维护或更新检查，禁用后相关自动流程不再执行。",
+                "禁用", false))
                 return;
             Apply(t, false);
         }
@@ -201,20 +190,5 @@ namespace GuyueBox.UI.Views
                     else { Dialog.Error(this, enable ? "启用失败" : "禁用失败", "操作失败：\r\n" + error); SetSubtitle("操作失败", Theme.Danger); }
                 });
             });
-        }
-
-        private void Post(ThreadStart action)
-        {
-            try
-            {
-                if (IsHandleCreated && !IsDisposed)
-                {
-                    BeginInvoke((MethodInvoker)delegate { action(); });
-                }
-            }
-            catch
-            {
-            }
-        }
-    }
+        }    }
 }

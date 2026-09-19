@@ -32,7 +32,7 @@ namespace GuyueBox.UI.Views
 
             _createButton = AddAction("创建还原点", "plus", ButtonVariant.Primary, OnCreateClick, 130);
             _deleteButton = AddAction("删除选中", "trash", ButtonVariant.Danger, OnDeleteClick, 118);
-            AddAction("刷新", "refresh", ButtonVariant.Secondary, delegate { Load(true); }, 92);
+            AddAction("刷新", "refresh", ButtonVariant.Secondary, delegate { Load(); }, 92);
 
             BuildGrid();
             BuildLayout();
@@ -72,28 +72,17 @@ namespace GuyueBox.UI.Views
 
         private void Relayout()
         {
-            int summaryH = _summary.PreferredHeight;
-            _summary.Height = summaryH;
-            Control row = _summary.Parent;
-            if (row != null) row.Height = summaryH;
-
-            int used = Body.Padding.Top + Body.Padding.Bottom + 42 + 18 + summaryH + 18;
-            int avail = ViewportHeight - used;
-            if (avail < 220) avail = 220;
-
-            if (_grid.Height != avail) _grid.Height = avail;
-            _grid.Invalidate();
-            RefreshLayout();
+            LayoutGrid(_grid, _summary, 0, 220);
         }
 
         public override void OnActivated()
         {
-            if (!_loaded) Load(false);
+            if (!_loaded) Load();
         }
 
         // --------------------------------------------------------------
 
-        private void Load(bool force)
+        private void Load()
         {
             if (_busy) return;
             _busy = true;
@@ -189,7 +178,7 @@ namespace GuyueBox.UI.Views
                     if (ok)
                     {
                         Dialog.Success(this, "已创建", "系统还原点「" + name + "」已创建。");
-                        Load(true);
+                        Load();
                     }
                     else
                     {
@@ -211,8 +200,11 @@ namespace GuyueBox.UI.Views
             RestorePoint p = _grid.SelectedRows[0].Tag as RestorePoint;
             if (p == null) return;
 
-            if (!Dialog.Confirm(this, "删除还原点",
-                "确定要删除还原点「" + p.Description + "」（序号 " + p.Sequence + "）吗？\r\n\r\n删除后无法恢复该还原点。"))
+            if (!Dialog.ConfirmDanger(this, "删除还原点",
+                "删除还原点「" + p.Description + "」（序号 " + p.Sequence + "）。",
+                "不可撤销：该还原点会被彻底移除，无法找回。",
+                "只影响这一个还原点；其他还原点与当前系统文件不受影响。",
+                "删除", true))
                 return;
 
             _busy = true;
@@ -229,7 +221,7 @@ namespace GuyueBox.UI.Views
                     if (ok)
                     {
                         Dialog.Success(this, "已删除", "还原点「" + p.Description + "」已删除。");
-                        Load(true);
+                        Load();
                     }
                     else
                     {
@@ -239,20 +231,5 @@ namespace GuyueBox.UI.Views
                     }
                 });
             });
-        }
-
-        private void Post(ThreadStart action)
-        {
-            try
-            {
-                if (IsHandleCreated && !IsDisposed)
-                {
-                    BeginInvoke((MethodInvoker)delegate { action(); });
-                }
-            }
-            catch
-            {
-            }
-        }
-    }
+        }    }
 }

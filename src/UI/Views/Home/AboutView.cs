@@ -60,7 +60,9 @@ namespace GuyueBox.UI.Views
 
         private static string CurrentVersion()
         {
-            return "v" + MainForm.AppVersion; // 单一版本来源：MainForm.AppVersion（与程序集版本一致）
+            // MainForm.AppVersion 转发自 AppInfo.Version，程序集版本也由它派生，
+            // 因此界面与 exe 属性不会出现两个版本号
+            return "v" + MainForm.AppVersion;
         }
 
         private void OnCheckUpdate(object sender, EventArgs e)
@@ -166,23 +168,11 @@ namespace GuyueBox.UI.Views
             }
             try
             {
-                System.Diagnostics.Process.Start(UpdateChecker.ProjectUrl);
+                using (System.Diagnostics.Process.Start(UpdateChecker.ProjectUrl)) { }
             }
             catch (Exception ex)
             {
                 Dialog.Error(this, "无法打开", ex.Message);
             }
-        }
-
-        private void Post(ThreadStart action)
-        {
-            try
-            {
-                if (IsHandleCreated && !IsDisposed) BeginInvoke(action);
-            }
-            catch
-            {
-            }
-        }
-    }
+        }    }
 }

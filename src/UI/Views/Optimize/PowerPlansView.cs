@@ -30,7 +30,7 @@ namespace GuyueBox.UI.Views
             _summary.IconKind = "power";
             _summary.CaptionColor = Theme.Accent;
 
-            AddAction("刷新", "refresh", ButtonVariant.Secondary, delegate { Load(true); }, 92);
+            AddAction("刷新", "refresh", ButtonVariant.Secondary, delegate { Load(); }, 92);
             AddAction("推荐方案", "shield", ButtonVariant.Primary, OnRecommendClick, 130);
             _applyButton = AddAction("应用此计划", "power", ButtonVariant.Secondary, OnApplyClick, 130);
             _ultimateButton = AddAction("启用终极性能", "bolt", ButtonVariant.Ghost, OnUltimateClick, 130);
@@ -72,26 +72,15 @@ namespace GuyueBox.UI.Views
 
         private void Relayout()
         {
-            int summaryH = _summary.PreferredHeight;
-            _summary.Height = summaryH;
-            Control row = _summary.Parent;
-            if (row != null) row.Height = summaryH;
-
-            int used = Body.Padding.Top + Body.Padding.Bottom + 42 + 18 + summaryH + 18;
-            int avail = ViewportHeight - used;
-            if (avail < 200) avail = 200;
-
-            if (_grid.Height != avail) _grid.Height = avail;
-            _grid.Invalidate();
-            RefreshLayout();
+            LayoutGrid(_grid, _summary, 0, 200);
         }
 
         public override void OnActivated()
         {
-            if (!_loaded) Load(false);
+            if (!_loaded) Load();
         }
 
-        private void Load(bool force)
+        private void Load()
         {
             if (_busy) return;
             _busy = true;
@@ -134,11 +123,7 @@ namespace GuyueBox.UI.Views
 
         private PowerPlan Selected
         {
-            get
-            {
-                if (_grid.SelectedRows.Count == 0) return null;
-                return _grid.SelectedRows[0].Tag as PowerPlan;
-            }
+            get { return SelectedFrom<PowerPlan>(_grid); }
         }
 
         private void UpdateActions()
@@ -196,7 +181,7 @@ namespace GuyueBox.UI.Views
                     {
                         SetSubtitle("已按推荐应用「" + target.Name + "」" +
                             (laptop ? "（笔记本：均衡之选）。" : "（台式机：性能首选）。"), Theme.Success);
-                        Load(true);
+                        Load();
                     }
                     else
                     {
@@ -221,7 +206,7 @@ namespace GuyueBox.UI.Views
                 Post(delegate
                 {
                     _busy = false;
-                    if (ok) { SetSubtitle("已应用：" + p.Name, Theme.Success); Load(true); }
+                    if (ok) { SetSubtitle("已应用：" + p.Name, Theme.Success); Load(); }
                     else { Dialog.Error(this, "应用失败", "无法切换电源计划：\r\n" + error); SetSubtitle("应用失败", Theme.Danger); }
                 });
             });
@@ -243,24 +228,9 @@ namespace GuyueBox.UI.Views
                 Post(delegate
                 {
                     _busy = false;
-                    if (ok) { Dialog.Success(this, "已启用", "「终极性能」计划已创建并激活。重启后完全生效。"); SetSubtitle("已启用终极性能计划", Theme.Success); Load(true); }
+                    if (ok) { Dialog.Success(this, "已启用", "「终极性能」计划已创建并激活。重启后完全生效。"); SetSubtitle("已启用终极性能计划", Theme.Success); Load(); }
                     else { Dialog.Error(this, "启用失败", "无法启用终极性能计划：\r\n" + error); SetSubtitle("启用失败", Theme.Danger); }
                 });
             });
-        }
-
-        private void Post(ThreadStart action)
-        {
-            try
-            {
-                if (IsHandleCreated && !IsDisposed)
-                {
-                    BeginInvoke((MethodInvoker)delegate { action(); });
-                }
-            }
-            catch
-            {
-            }
-        }
-    }
+        }    }
 }

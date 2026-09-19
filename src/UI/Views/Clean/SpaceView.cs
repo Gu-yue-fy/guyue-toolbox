@@ -99,7 +99,7 @@ namespace GuyueBox.UI.Views
         {
             Card card = new Card();
             card.BackColor = Theme.CardBg;
-            card.Radius = 12;
+            card.Radius = Theme.RadiusCard;
             card.HeaderText = title;
             card.HeaderIcon = icon;
             card.HeaderIconColor = accent;
@@ -389,9 +389,11 @@ namespace GuyueBox.UI.Views
                 return;
             }
 
-            if (!Dialog.Confirm(this, "删除文件",
-                "确定要删除这个文件吗？\r\n\r\n" + path + "\r\n大小：" + entry.SizeText +
-                "\r\n\r\n此操作不可撤销，且不会进入回收站。"))
+            if (!Dialog.ConfirmDanger(this, "删除文件",
+                "直接从磁盘删除该文件。",
+                "不可撤销：不会进入回收站，本工具也不保留备份。",
+                path + "\r\n大小：" + entry.SizeText,
+                "删除", true))
                 return;
 
             try
@@ -414,20 +416,5 @@ namespace GuyueBox.UI.Views
                 Dialog.Error(this, "删除失败",
                     "无法删除该文件。\r\n\r\n常见原因：文件正在被占用，或权限不足。\r\n\r\n" + ex.Message);
             }
-        }
-
-        private void Post(ThreadStart action)
-        {
-            try
-            {
-                if (IsHandleCreated && !IsDisposed)
-                {
-                    BeginInvoke((MethodInvoker)delegate { action(); });
-                }
-            }
-            catch
-            {
-            }
-        }
-    }
+        }    }
 }

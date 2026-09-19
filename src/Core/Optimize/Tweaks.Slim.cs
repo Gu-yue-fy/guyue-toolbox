@@ -428,7 +428,7 @@ namespace GuyueBox.Core
             bgPriority.IdValue = "ifeo_bg_priority";
             bgPriority.GroupValue = GExtreme;
             bgPriority.NameValue = "后台进程优先级调优";
-            bgPriority.DescriptionValue = "通过 IFEO 把 ctfmon（输入法）、SearchIndexer（索引）、fontdrvhost（字体）、lsass、sihost、sppsvc（授权）、csrss 等后台进程的 CPU/IO 优先级压低，前台应用资源更充裕。属于激进调度调整，异常时还原。";
+            bgPriority.DescriptionValue = "通过 IFEO 把 ctfmon（输入法）、SearchIndexer（索引）、fontdrvhost（字体）、sihost、sppsvc（授权）、csrss 等后台进程的 CPU/IO 优先级压低，前台应用资源更充裕。属于激进调度调整，异常时还原。";
             bgPriority.RiskyValue = true;
             bgPriority.AdminOnlyValue = true;
             bgPriority.Enable.Add(RegWrite.Dword(RegistryHive.LocalMachine,
@@ -439,8 +439,8 @@ namespace GuyueBox.Core
                 @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\fontdrvhost.exe\PerfOptions", "CpuPriorityClass", 1));
             bgPriority.Enable.Add(RegWrite.Dword(RegistryHive.LocalMachine,
                 @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\fontdrvhost.exe\PerfOptions", "IoPriority", 0));
-            bgPriority.Enable.Add(RegWrite.Dword(RegistryHive.LocalMachine,
-                @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\lsass.exe\PerfOptions", "CpuPriorityClass", 1));
+            // lsass.exe 不再在此写入：它与「系统进程优先级重排」项写同一个值（均为 1），
+            // 重复写入会让两个项的备份归属与"已启用"判定互相干扰，保留在该专项即可
             bgPriority.Enable.Add(RegWrite.Dword(RegistryHive.LocalMachine,
                 @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\sihost.exe\PerfOptions", "CpuPriorityClass", 1));
             bgPriority.Enable.Add(RegWrite.Dword(RegistryHive.LocalMachine,

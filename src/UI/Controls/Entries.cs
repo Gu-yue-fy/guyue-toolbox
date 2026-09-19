@@ -26,7 +26,38 @@ namespace GuyueBox.UI
             _caption = caption;
             _icon = icon;
             _accent = accent;
+            A11y.MakeFocusable(this, AccessibleRole.PushButton);
+            AccessibleName = caption == null ? "" : caption;
         }
+
+        /// <summary>键盘可达：Enter / 空格触发。</summary>
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                OnClick(EventArgs.Empty);
+                return;
+            }
+            if (e.KeyCode == Keys.Space) { e.Handled = true; e.SuppressKeyPress = true; return; }
+            base.OnKeyDown(e);
+        }
+
+        protected override void OnKeyUp(KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Space)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                OnClick(EventArgs.Empty);
+                return;
+            }
+            base.OnKeyUp(e);
+        }
+
+        protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+        protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
 
         public string Caption
         {
@@ -96,13 +127,17 @@ namespace GuyueBox.UI
             Gfx.StrokeRound(g, r, circle / 2, Gfx.Alpha(_accent, _hover ? 170 : 90), 1.5f);
 
             int iconSize = (int)(circle * 0.44);
+            // 悬停底色只是「很淡的强调色叠加」（alpha 42），浅色主题下近似白底，
+            // 此时若用白色图标会完全看不见——改用主题前景色，两套方案都清晰。
             IconPainter.Draw(g, _icon,
                 new Rectangle(cx + (circle - iconSize) / 2, 6 + (circle - iconSize) / 2, iconSize, iconSize),
-                _hover ? Color.White : _accent);
+                _hover ? Theme.TextPrimary : _accent);
 
             Gfx.DrawTextCenter(g, _caption, Theme.FontSmall,
                 _hover ? Theme.TextPrimary : Theme.TextSecondary,
                 new Rectangle(0, circle + 16, Width, Height - circle - 16));
+
+            if (Focused) A11y.DrawFocusRing(g, new Rectangle(0, 0, Width - 1, Height - 1), Theme.RadiusCard);
         }
     }
 
@@ -135,7 +170,7 @@ namespace GuyueBox.UI
         public HealthCard()
         {
             BackColor = Theme.CardBg;
-            Radius = 12;
+            Radius = Theme.RadiusCard;
             Height = 156;
         }
 

@@ -34,6 +34,8 @@ namespace GuyueBox.Core
                     System.Net.NetworkInformation.NetworkInterface ni = nics[i];
                     if (ni.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Loopback)
                         continue;
+                    if (ni.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Tunnel)
+                        continue;
                     if (string.Equals(ni.Name, "Loopback Pseudo-Interface 1", StringComparison.OrdinalIgnoreCase))
                         continue;
                     if (!list.Contains(ni.Name)) list.Add(ni.Name);

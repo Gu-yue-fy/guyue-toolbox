@@ -35,7 +35,9 @@ namespace GuyueBox.UI.Views
             _tabRow.WrapContents = false;
             _tabRow.BackColor = Theme.WindowBg;
             _tabRow.Height = TabRowHeight;
-            _tabRow.Tag = "row";
+            // 不可用 "row"/"rowfixed" 标签：那会让 LayoutRowChildren 把页签等分拉宽成半行
+            // （"性能基准"页签曾因此占 415px、Ghost 页签文字飘到右侧）。"stretch" 只撑满行宽。
+            _tabRow.Tag = "stretch";
             _tabRow.Margin = new Padding(0, 0, 0, 14);
 
             for (int i = 0; i < labels.Length; i++)

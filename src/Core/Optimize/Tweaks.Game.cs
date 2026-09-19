@@ -231,7 +231,7 @@ namespace GuyueBox.Core
                 @"SOFTWARE\Microsoft\Windows\Dwm", "DisableHologramCompositor", 1));
             dwmDeep.Enable.Add(RegWrite.Dword(RegistryHive.LocalMachine,
                 @"SOFTWARE\Microsoft\Windows\Dwm", "EnableDesktopOverlays", 0));
-            // dunu DWM性能优化：投影阴影/设备位图/输入预测
+            // DWM性能优化：投影阴影/设备位图/输入预测
             dwmDeep.Enable.Add(RegWrite.Dword(RegistryHive.LocalMachine,
                 @"SOFTWARE\Microsoft\Windows\Dwm", "DisableProjectedShadows", 1));
             dwmDeep.Enable.Add(RegWrite.Dword(RegistryHive.LocalMachine,
@@ -242,7 +242,7 @@ namespace GuyueBox.Core
                 @"SOFTWARE\Microsoft\Windows\Dwm", "InteractionOutputPredictionDisabled", 1));
             list.Add(dwmDeep);
 
-            // ---- dunu 14.叠加补充 / 10.超目标优先 吸收：显卡呈现与固件 ----
+            // ---- 14.叠加补充 / 10.超目标优先 吸收：显卡呈现与固件 ----
 
             RegTweak gpuFlip = new RegTweak();
             gpuFlip.IdValue = "gpu_flip_reporting";
@@ -257,7 +257,7 @@ namespace GuyueBox.Core
             GpuInstanceTweak gpuFw = new GpuInstanceTweak(
                 "gpu_firmware_dsp",
                 "显卡固件调度与链路低延迟（谨慎）",
-                "EnableGpuFirmware=1 启用 GPU 固件调度（DSP，需 N 卡 560+ 驱动）、LOWLATENCY=1 与 D3PCLatency=1 降低显示链路延迟。dunu 作者标注有风险，仅建议 N 卡用户尝试，出问题还原即可。",
+                "EnableGpuFirmware=1 启用 GPU 固件调度（DSP，需 N 卡 560+ 驱动）、LOWLATENCY=1 与 D3PCLatency=1 降低显示链路延迟。该项风险较高，仅建议 N 卡用户尝试，出问题还原即可。",
                 new KeyValuePair<string, object>[] {
                     new KeyValuePair<string, object>("EnableGpuFirmware", 1),
                     new KeyValuePair<string, object>("LOWLATENCY", 1),
@@ -479,7 +479,9 @@ namespace GuyueBox.Core
             mmcssDeep.Enable.Add(RegWrite.Dword(RegistryHive.LocalMachine, MM + @"\Tasks\Games", "Priority", 8));
             // （"Priority When Yielded" 无微软文档依据且社区流传值 19 超出 MMCSS 1-8 合法范围，不写入）
             mmcssDeep.Enable.Add(RegWrite.Dword(RegistryHive.LocalMachine, MM + @"\Tasks\Games", "BackgroundPriority", 8));
-            mmcssDeep.Enable.Add(RegWrite.Dword(RegistryHive.LocalMachine, MM + @"\Tasks\Games", "Clock Rate", 5002));
+            // Clock Rate 由「系统调度偏向游戏 (MMCSS)」一项写入（5000），此处不再重复写入：
+            // 两项写同一个值会让后应用者与前者的备份/状态判定互相干扰，
+            // 本项已用 SchedulerTimerResolution 控制计时分辨率，功能不缺失
             mmcssDeep.Enable.Add(RegWrite.Dword(RegistryHive.LocalMachine, MM + @"\Tasks\Audio", "Priority", 1));
             mmcssDeep.Enable.Add(RegWrite.Str(RegistryHive.LocalMachine, MM + @"\Tasks\Audio", "Scheduling Category", "Low"));
             mmcssDeep.Enable.Add(RegWrite.Dword(RegistryHive.LocalMachine, MM + @"\Tasks\Playback", "Priority", 1));
@@ -645,7 +647,7 @@ namespace GuyueBox.Core
             powerLatency.Enable.Add(RegWrite.Dword(RegistryHive.LocalMachine,
                 PW + @"\Profile\Events\{54533251-82be-4824-96c1-47b60b740d00}\{0DA965DC-8FCF-4c0b-8EFE-8DD5E7BC959A}\{7E01ADEF-81E6-4e1b-8075-56F373584694}",
                 "TimeLimitInSeconds", 2));
-            // dunu Windows电源事件策略稳定：低延迟/游戏模式事件权重提到最高
+            // Windows电源事件策略稳定：低延迟/游戏模式事件权重提到最高
             powerLatency.Enable.Add(RegWrite.Dword(RegistryHive.LocalMachine,
                 PW + @"\Profile\Events\{54533251-82be-4824-96c1-47b60b740d00}\{0DA965DC-8FCF-4c0b-8EFE-8DD5E7BC959A}",
                 "Pri", 0x28));

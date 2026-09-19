@@ -89,45 +89,51 @@ namespace GuyueBox.Core
         public bool Apply()
         {
             RegHelper.BeginBackup(Id);
+            bool ok = true;
+
+            // 类键（Control\Class\{Guid}）：只写已存在的类键，避免无驱动空类键
             for (int i = 0; i < Entries.Length; i++)
             {
                 Entry e = Entries[i];
                 try
                 {
-                    RegHelper.SetValue(RegistryHive.LocalMachine, PathOf(e), "BasePriority",
-                        e.BasePriority, RegistryValueKind.DWord, Id);
+                    if (!RegHelper.SetValueOnExisting(RegistryHive.LocalMachine, PathOf(e), "BasePriority",
+                        e.BasePriority, RegistryValueKind.DWord, Id)) ok = false;
                     if (e.OverTarget < 0)
                     {
                         RegHelper.DeleteValue(RegistryHive.LocalMachine, PathOf(e), "OverTargetPriority", Id);
                     }
                     else
                     {
-                        RegHelper.SetValue(RegistryHive.LocalMachine, PathOf(e), "OverTargetPriority",
-                            e.OverTarget, RegistryValueKind.DWord, Id);
+                        if (!RegHelper.SetValueOnExisting(RegistryHive.LocalMachine, PathOf(e), "OverTargetPriority",
+                            e.OverTarget, RegistryValueKind.DWord, Id)) ok = false;
                     }
                 }
                 catch
                 {
+                    ok = false;
                 }
             }
 
-            // 显卡实例子键（0000-0009）：与类键同步拉高
+            // 显卡实例子键（0000-0009）：只写已存在的实例——单显卡机器绝不凭空制造 0001-0009 幽灵键
             const string GpuClass = ClassRoot + "\\{4d36e968-e325-11ce-bfc1-08002be10318}";
             for (int i = 0; i < 10; i++)
             {
+                string inst = GpuClass + "\\000" + i;
                 try
                 {
-                    RegHelper.SetValue(RegistryHive.LocalMachine, GpuClass + "\\000" + i,
-                        "BasePriority", 255, RegistryValueKind.DWord, Id);
-                    RegHelper.SetValue(RegistryHive.LocalMachine, GpuClass + "\\000" + i,
-                        "OverTargetPriority", 96, RegistryValueKind.DWord, Id);
+                    if (!RegHelper.SetValueOnExisting(RegistryHive.LocalMachine, inst, "BasePriority",
+                        255, RegistryValueKind.DWord, Id)) ok = false;
+                    if (!RegHelper.SetValueOnExisting(RegistryHive.LocalMachine, inst, "OverTargetPriority",
+                        96, RegistryValueKind.DWord, Id)) ok = false;
                 }
                 catch
                 {
+                    ok = false;
                 }
             }
 
-            // 显卡链路（Control\Video\{GUID}\000x，GUID 每台机器不同，动态枚举）
+            // 显卡链路（Control\Video\{GUID}\000x，GUID 每台机器不同，动态枚举已存在子键）
             try
             {
                 using (RegistryKey root = Registry.LocalMachine.OpenSubKey(
@@ -146,17 +152,17 @@ namespace GuyueBox.Core
                                 for (int s = 0; s < subs.Length; s++)
                                 {
                                     if (subs[s].Length != 4 || !char.IsDigit(subs[s][0])) continue;
+                                    string path = @"SYSTEM\CurrentControlSet\Control\Video\" + guids[g] + "\\" + subs[s];
                                     try
                                     {
-                                        RegHelper.SetValue(RegistryHive.LocalMachine,
-                                            @"SYSTEM\CurrentControlSet\Control\Video\" + guids[g] + "\\" + subs[s],
-                                            "BasePriority", 255, RegistryValueKind.DWord, Id);
-                                        RegHelper.SetValue(RegistryHive.LocalMachine,
-                                            @"SYSTEM\CurrentControlSet\Control\Video\" + guids[g] + "\\" + subs[s],
-                                            "OverTargetPriority", 96, RegistryValueKind.DWord, Id);
+                                        if (!RegHelper.SetValue(RegistryHive.LocalMachine, path, "BasePriority",
+                                            255, RegistryValueKind.DWord, Id)) ok = false;
+                                        if (!RegHelper.SetValue(RegistryHive.LocalMachine, path, "OverTargetPriority",
+                                            96, RegistryValueKind.DWord, Id)) ok = false;
                                     }
                                     catch
                                     {
+                                        ok = false;
                                     }
                                 }
                             }
@@ -166,8 +172,9 @@ namespace GuyueBox.Core
             }
             catch
             {
+                ok = false;
             }
-            return true;
+            return ok;
         }
 
         public bool Revert()

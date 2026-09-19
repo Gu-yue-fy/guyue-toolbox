@@ -108,7 +108,80 @@ namespace GuyueBox.Core
             return true;
         }
 
-        /// <summary>把记录写回已打开（可写）的目标键。返回是否真正成功。</summary>
+        /// <summary>
+        /// 快照完整性校验：Kind 合法且 Data 能按 Kind 解析。
+        /// 损坏的快照不允许参与还原（避免用"看似成功"的坏数据覆盖系统当前值）。
+        /// </summary>
+        public bool Validate()
+        {
+            try
+            {
+                switch (Kind)
+                {
+                    case RegistryValueKind.DWord:
+                        int iv;
+                        return int.TryParse(Data, NumberStyles.Integer, CultureInfo.InvariantCulture, out iv);
+                    case RegistryValueKind.QWord:
+                        long lv;
+                        return long.TryParse(Data, NumberStyles.Integer, CultureInfo.InvariantCulture, out lv);
+                    case RegistryValueKind.Binary:
+                        if (string.IsNullOrEmpty(Data)) return true;
+                        Convert.FromBase64String(Data);
+                        return true;
+                    default:
+                        return true;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>快照数据归一化后的期望字符串（用于还原后比对）。</summary>
+        private string ExpectedNormalized()
+        {
+            try
+            {
+                switch (Kind)
+                {
+                    case RegistryValueKind.DWord:
+                        return unchecked((uint)int.Parse(Data, CultureInfo.InvariantCulture))
+                            .ToString(CultureInfo.InvariantCulture);
+                    case RegistryValueKind.QWord:
+                        return unchecked((ulong)long.Parse(Data, CultureInfo.InvariantCulture))
+                            .ToString(CultureInfo.InvariantCulture);
+                    case RegistryValueKind.MultiString:
+                        return string.Join(",", Data.Length == 0 ? new string[0] : Data.Split('\n'));
+                    default:
+                        return Data;
+                }
+            }
+            catch
+            {
+                return Data;
+            }
+        }
+
+        /// <summary>还原后校验：读回值与快照一致才算还原成功。</summary>
+        private bool VerifyRestored(RegistryKey target)
+        {
+            try
+            {
+                object v = target.GetValue(Name, null);
+                if (v == null) return false;
+                RegistryValueKind k = target.GetValueKind(Name);
+                if (k != Kind) return false;
+                return string.Equals(RegHelper.NormalizeValue(v, k), ExpectedNormalized(),
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>把记录写回已打开（可写）的目标键。返回是否真正成功（含恢复后校验）。</summary>
         public bool RestoreInto(RegistryKey target)
         {
             if (target == null) return false;
@@ -117,7 +190,8 @@ namespace GuyueBox.Core
                 if (!Existed)
                 {
                     target.DeleteValue(Name, false);
-                    return true;
+                    // 删除后校验：仍能读到说明未删掉
+                    return target.GetValue(Name, null) == null;
                 }
                 switch (Kind)
                 {
@@ -141,7 +215,7 @@ namespace GuyueBox.Core
                         target.SetValue(Name, Data, RegistryValueKind.String);
                         break;
                 }
-                return true;
+                return VerifyRestored(target);
             }
             catch
             {
@@ -172,27 +246,24 @@ namespace GuyueBox.Core
     {
         private const string BackupRoot = @"Software\GuyueBox\Backup";
 
-        // 基键句柄缓存：HKLM/HKCU 等基键进程级常驻，省掉每次读写的 RegOpenKey/RegCloseKey
-        // 系统调用（优化中心状态探测一轮要数千次）。共享句柄绝不 Dispose，由进程退出统一回收。
-        private static readonly Dictionary<RegistryHive, RegistryKey> _baseCache =
-            new Dictionary<RegistryHive, RegistryKey>();
+        // 基键句柄按线程本地缓存：每个线程持有自己独立的 RegistryKey 实例，
+        // 杜绝多线程并行探测时（优化中心 Parallel.For 状态探测）共享同一 RegistryKey
+        // 导致的内部状态竞争——RegistryKey 实例成员非线程安全，并发 OpenSubKey/GetValue
+        // 可能抛 IOException 甚至损坏句柄，使后续全部读失败。各线程独立实例既保留缓存收益，
+        // 又让 HKLM/HKCU 在不同线程上真正并行（线程池线程有限，键随线程回收）。
+        [ThreadStatic]
+        private static Dictionary<RegistryHive, RegistryKey> _tlsBases;
 
-        /// <summary>取（或建立）hive 的常驻基键。返回的键由缓存持有，调用方不得 Dispose。</summary>
+        /// <summary>取（或建立）hive 在本线程的常驻基键。返回的键由线程本地持有，调用方不得 Dispose。</summary>
         private static RegistryKey Base(RegistryHive hive)
         {
-            lock (_baseCache)
-            {
-                RegistryKey k;
-                if (_baseCache.TryGetValue(hive, out k)) return k;
-                k = RegistryKey.OpenBaseKey(hive, RegistryView.Default);
-                _baseCache[hive] = k;
-                return k;
-            }
-        }
-
-        public static RegistryKey OpenBase(RegistryHive hive)
-        {
-            return Base(hive);
+            Dictionary<RegistryHive, RegistryKey> map = _tlsBases;
+            if (map == null) { map = new Dictionary<RegistryHive, RegistryKey>(); _tlsBases = map; }
+            RegistryKey k;
+            if (map.TryGetValue(hive, out k)) return k;
+            k = RegistryKey.OpenBaseKey(hive, RegistryView.Default);
+            map[hive] = k;
+            return k;
         }
 
         /// <summary>关联类（RegEntry）内部使用的缓存基键。返回的键由缓存持有，不得 Dispose。</summary>
@@ -260,6 +331,105 @@ namespace GuyueBox.Core
             }
         }
 
+        /// <summary>
+        /// 值归一化为可比较字符串：
+        /// DWord/QWord 按无符号解释（-1 与 4294967295 视为同一值），Binary 用 Base64，
+        /// MultiString 用逗号连接，其余 InvariantCulture 转字符串。
+        /// </summary>
+        internal static string NormalizeValue(object value, RegistryValueKind kind)
+        {
+            if (value == null) return "";
+            try
+            {
+                switch (kind)
+                {
+                    case RegistryValueKind.DWord:
+                        return unchecked((uint)Convert.ToInt32(value, CultureInfo.InvariantCulture))
+                            .ToString(CultureInfo.InvariantCulture);
+                    case RegistryValueKind.QWord:
+                        return unchecked((ulong)Convert.ToInt64(value, CultureInfo.InvariantCulture))
+                            .ToString(CultureInfo.InvariantCulture);
+                    case RegistryValueKind.MultiString:
+                        return string.Join(",", (string[])value);
+                    case RegistryValueKind.Binary:
+                        return Convert.ToBase64String((byte[])value);
+                    default:
+                        return Convert.ToString(value, CultureInfo.InvariantCulture) ?? "";
+                }
+            }
+            catch
+            {
+                try { return value.ToString() ?? ""; }
+                catch { return ""; }
+            }
+        }
+
+        /// <summary>写入后校验：类型一致且归一化值相等。</summary>
+        private static bool VerifyValue(RegistryKey k, string name, object expected, RegistryValueKind kind)
+        {
+            try
+            {
+                object actual = k.GetValue(name, null);
+                if (actual == null) return false;
+                RegistryValueKind actualKind = k.GetValueKind(name);
+                if (actualKind != kind) return false;
+                return string.Equals(NormalizeValue(actual, actualKind), NormalizeValue(expected, kind),
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 失败自动回滚：把键内该值恢复到本次写入前的状态（原本存在→写回原值，原本不存在→删除）。
+        /// 返回是否回滚到位。
+        /// </summary>
+        private static bool RollbackInPlace(RegistryKey k, string name, bool existed,
+            object priorValue, RegistryValueKind priorKind)
+        {
+            try
+            {
+                if (existed && priorValue != null)
+                {
+                    if (priorKind == RegistryValueKind.Unknown) priorKind = RegistryValueKind.String;
+                    k.SetValue(name, priorValue, priorKind);
+                    return k.GetValue(name, null) != null;
+                }
+                k.DeleteValue(name, false);
+                return k.GetValue(name, null) == null;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>读取键内某值的原始状态（用于失败回滚）。</summary>
+        private static void ReadPrior(RegistryKey k, string name,
+            out bool existed, out object value, out RegistryValueKind kind)
+        {
+            existed = false;
+            value = null;
+            kind = RegistryValueKind.Unknown;
+            try
+            {
+                object v = k.GetValue(name, null);
+                if (v == null) return;
+                existed = true;
+                value = v;
+                kind = k.GetValueKind(name);
+            }
+            catch
+            {
+            }
+        }
+
+        /// <summary>
+        /// 写值：先记录备份 → 读原值快照 → 写入 → 写入后校验 → 校验失败自动回滚。
+        /// 返回 true 表示「已写入且读回校验通过」，不再出现"调用没报错但其实没写进去"的假成功。
+        /// </summary>
         public static bool SetValue(RegistryHive hive, string path, string name, object value,
             RegistryValueKind kind, string backupId)
         {
@@ -276,7 +446,34 @@ namespace GuyueBox.Core
                         RegLog.Add(backupId, "写入失败", hive + "\\" + path + " → " + name + "（无法创建键）");
                         return false;
                     }
-                    k.SetValue(name, value, kind);
+
+                    bool priorExisted;
+                    object priorValue;
+                    RegistryValueKind priorKind;
+                    ReadPrior(k, name, out priorExisted, out priorValue, out priorKind);
+
+                    try
+                    {
+                        k.SetValue(name, value, kind);
+                    }
+                    catch (Exception ex)
+                    {
+                        bool rolled = RollbackInPlace(k, name, priorExisted, priorValue, priorKind);
+                        RegLog.Add(backupId, "写入失败",
+                            hive + "\\" + path + " → " + name + "（" + ex.Message + "）" +
+                            (rolled ? "（已自动回滚）" : "（自动回滚失败）"));
+                        return false;
+                    }
+
+                    if (!VerifyValue(k, name, value, kind))
+                    {
+                        bool rolled = RollbackInPlace(k, name, priorExisted, priorValue, priorKind);
+                        RegLog.Add(backupId, "写入校验失败",
+                            hive + "\\" + path + " → " + name +
+                            (rolled ? "（已自动回滚）" : "（自动回滚失败）"));
+                        return false;
+                    }
+
                     RegLog.Add(backupId, "写入", hive + "\\" + path + " → " + name);
                     return true;
                 }
@@ -288,6 +485,9 @@ namespace GuyueBox.Core
             }
         }
 
+        /// <summary>
+        /// 删值：先记录备份 → 读原值快照 → 删除 → 删除后校验（仍能读到即失败）→ 失败自动回滚。
+        /// </summary>
         public static bool DeleteValue(RegistryHive hive, string path, string name, string backupId)
         {
             try
@@ -299,7 +499,22 @@ namespace GuyueBox.Core
                 using (RegistryKey k = b.OpenSubKey(path, true))
                 {
                     if (k == null) return true;
+
+                    bool priorExisted;
+                    object priorValue;
+                    RegistryValueKind priorKind;
+                    ReadPrior(k, name, out priorExisted, out priorValue, out priorKind);
+
                     k.DeleteValue(name, false);
+
+                    if (k.GetValue(name, null) != null)
+                    {
+                        bool rolled = RollbackInPlace(k, name, priorExisted, priorValue, priorKind);
+                        RegLog.Add(backupId, "删除校验失败",
+                            hive + "\\" + path + " → " + name + (rolled ? "（已自动回滚）" : "（自动回滚失败）"));
+                        return false;
+                    }
+
                     RegLog.Add(backupId, "删除", hive + "\\" + path + " → " + name);
                     return true;
                 }
@@ -423,6 +638,17 @@ namespace GuyueBox.Core
                             e = RegEntry.Parse(raw); // 旧格式：序号值名 + 全字段内容
                             if (e == null) continue;
                         }
+
+                        // 快照完整性校验：损坏的快照跳过还原并计为失败，
+                        // 绝不用"看似成功"的坏数据去覆盖系统当前值。
+                        if (!e.Validate())
+                        {
+                            any = true;
+                            fail++;
+                            RegLog.Add(backupId, "快照损坏", e.Hive + "\\" + e.Path + " → " + e.Name + "（已跳过还原）");
+                            continue;
+                        }
+
                         entries.Add(e);
                         any = true;
                     }
@@ -505,22 +731,6 @@ namespace GuyueBox.Core
                 fail++;
             }
             return any && fail == 0;
-        }
-
-        public static bool HasBackup(string backupId)
-        {
-            try
-            {
-                RegistryKey b = Base(RegistryHive.CurrentUser);
-                using (RegistryKey key = b.OpenSubKey(BackupKeyPath(backupId), false))
-                {
-                    return key != null && key.GetValueNames().Length > 0;
-                }
-            }
-            catch
-            {
-                return false;
-            }
         }
 
         // ---------------- 服务启动类型 ----------------

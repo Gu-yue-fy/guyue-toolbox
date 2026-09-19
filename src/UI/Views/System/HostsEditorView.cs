@@ -8,7 +8,7 @@ namespace GuyueBox.UI.Views
 {
     /// <summary>
     /// Hosts 编辑器：查看与编辑系统 hosts 文件（自动备份原文件）。
-    /// 注意：本页是通用编辑器，与此前已移除的「广告屏蔽」无关。
+    /// 本页只是通用文本编辑器，不承担任何「广告屏蔽」语义。
     /// </summary>
     public sealed class HostsEditorView : ViewBase
     {
@@ -33,7 +33,7 @@ namespace GuyueBox.UI.Views
             _editor.BorderStyle = BorderStyle.None;
             _editor.BackColor = Theme.CardBg;
             _editor.ForeColor = Theme.TextPrimary;
-            _editor.Font = new Font("Consolas", 9.5F);
+            _editor.Font = Theme.FontMono; // 统一走主题等宽字体（Cascadia Mono → Consolas 兜底）
             _editor.WordWrap = false;
             _editor.TextChanged += delegate { if (!_dirty) { _dirty = true; UpdateButtons(); } };
 
@@ -124,7 +124,11 @@ namespace GuyueBox.UI.Views
                 Dialog.Info(this, "没有备份", "尚未保存过任何修改（hosts.bak 不存在）。");
                 return;
             }
-            if (!Dialog.Confirm(this, "还原备份", "用 hosts.bak 覆盖当前 hosts 吗？")) return;
+            if (!Dialog.ConfirmDanger(this, "还原 hosts 备份",
+                "用 hosts.bak 覆盖当前的 hosts 文件。",
+                "可撤销：再次编辑保存即可；编辑器在每次保存前都会重新备份。",
+                "仅影响 hosts 解析规则；系统重启或刷新 DNS 缓存后生效。",
+                "还原", false)) return;
             try
             {
                 File.Copy(bak, HostsPath, true);

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Drawing;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using GuyueBox.Core;
 
@@ -193,23 +194,10 @@ namespace GuyueBox.UI.Views
 
             ThreadPool.QueueUserWorkItem(delegate
             {
+                Post(delegate { SetSubtitle("正在并行扫描各分类…", Theme.Warning); });
                 try
                 {
-                    for (int i = 0; i < _categories.Count; i++)
-                    {
-                        JunkCategory c = _categories[i];
-                        _scanner.Scan(c);
-                        int index = i;
-                        Post(delegate
-                        {
-                            if (index < _grid.Rows.Count)
-                            {
-                                _grid.Rows[index].Cells[3].Value = c.FileCount.ToString();
-                                _grid.Rows[index].Cells[4].Value = c.SizeText;
-                            }
-                            SetSubtitle("正在扫描：" + c.Name, Theme.Warning);
-                        });
-                    }
+                    ScanCategoriesParallel();
                 }
                 catch
                 {
@@ -232,6 +220,23 @@ namespace GuyueBox.UI.Views
                         if (_categories[i].Selected) total += _categories[i].Size;
                     }
                     SetSubtitle("扫描完成，已选中项目可释放约 " + SysInfo.FormatSize(total) + "。", Theme.Success);
+                });
+            });
+        }
+
+        /// <summary>并行扫描所有垃圾类别：各分类的目录遍历相互独立，并发执行可显著缩短总耗时。</summary>
+        private void ScanCategoriesParallel()
+        {
+            _scanner.ScanAll(_categories, delegate(int index)
+            {
+                Post(delegate
+                {
+                    if (index < _grid.Rows.Count)
+                    {
+                        JunkCategory c = _categories[index];
+                        _grid.Rows[index].Cells[3].Value = c.FileCount.ToString();
+                        _grid.Rows[index].Cells[4].Value = c.SizeText;
+                    }
                 });
             });
         }
@@ -314,7 +319,7 @@ namespace GuyueBox.UI.Views
             {
                 try
                 {
-                    for (int i = 0; i < _categories.Count; i++) _scanner.Scan(_categories[i]);
+                    ScanCategoriesParallel();
                 }
                 catch
                 {
@@ -353,13 +358,12 @@ namespace GuyueBox.UI.Views
             long total = 0;
             for (int i = 0; i < targets.Count; i++) total += targets[i].Size;
 
-            string message = "即将清理 " + targets.Count + " 个类别，预计释放 " + SysInfo.FormatSize(total) + "。\r\n\r\n" +
-                "注意：\r\n" +
-                "· 正在被程序占用的文件会被自动跳过；\r\n" +
-                "· 回收站中的文件删除后无法恢复；\r\n" +
-                "· Windows 更新缓存被清理后，已安装的更新将无法回滚。\r\n\r\n是否继续？";
-
-            if (!Dialog.Confirm(this, "确认清理", message)) return;
+            if (!Dialog.ConfirmDanger(this, "清理垃圾文件",
+                "清理 " + targets.Count + " 个类别，预计释放 " + SysInfo.FormatSize(total) + "。",
+                "部分可撤销：清空回收站后其中的文件无法恢复；其余为缓存，系统会按需重建。",
+                "正在被程序占用的文件会被自动跳过；Windows 更新缓存清理后，已安装的更新将无法回滚。",
+                "开始清理", false))
+                return;
 
             RunClean(targets);
         }
@@ -448,20 +452,5 @@ namespace GuyueBox.UI.Views
                 }
             }
             Dialog.Info(this, "目录不存在", "该项对应的目录当前不存在。");
-        }
-
-        private void Post(ThreadStart action)
-        {
-            try
-            {
-                if (IsHandleCreated && !IsDisposed)
-                {
-                    BeginInvoke((MethodInvoker)delegate { action(); });
-                }
-            }
-            catch
-            {
-            }
-        }
-    }
+        }    }
 }

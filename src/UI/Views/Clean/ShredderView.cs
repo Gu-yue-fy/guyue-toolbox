@@ -163,14 +163,47 @@ namespace GuyueBox.UI.Views
             ShredEntry entry = new ShredEntry();
             entry.Path = path;
             entry.IsDir = System.IO.Directory.Exists(path);
-            entry.Size = Shredder.Measure(path);
 
             _items.Add(entry);
-            int idx = _grid.Rows.Add(path, entry.IsDir ? "文件夹" : "文件",
-                entry.Size > 0 ? SysInfo.FormatSize(entry.Size) : "—");
+            int idx;
+
+            if (entry.IsDir)
+            {
+                // 目录体积要递归遍历整棵树（可能几秒到几十秒），绝不能在 UI 线程算：
+                // 先占位显示，再到后台算完回填
+                entry.Size = -1;
+                idx = _grid.Rows.Add(path, "文件夹", "计算中…");
+                _grid.Rows[idx].Tag = entry;
+                _grid.ClearSelection();
+                UpdateSummary();
+                MeasureDirAsync(entry, idx);
+                return;
+            }
+
+            // 单个文件：只是一次 FileInfo.Length，同步取即可
+            entry.Size = Shredder.Measure(path);
+            idx = _grid.Rows.Add(path, "文件", entry.Size > 0 ? SysInfo.FormatSize(entry.Size) : "—");
             _grid.Rows[idx].Tag = entry;
             _grid.ClearSelection();
             UpdateSummary();
+        }
+
+        /// <summary>后台计算目录体积并回填对应行；行若已被移除或替换则安全跳过。</summary>
+        private void MeasureDirAsync(ShredEntry entry, int rowIndex)
+        {
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                long size = Shredder.Measure(entry.Path);
+                Post(delegate
+                {
+                    if (rowIndex < 0 || rowIndex >= _grid.Rows.Count) return;
+                    DataGridViewRow row = _grid.Rows[rowIndex];
+                    if (!ReferenceEquals(row.Tag, entry)) return;
+                    entry.Size = size;
+                    row.Cells[2].Value = size > 0 ? SysInfo.FormatSize(size) : "—";
+                    UpdateSummary();
+                });
+            });
         }
 
         private void OnAddFiles(object sender, EventArgs e)
@@ -249,7 +282,11 @@ namespace GuyueBox.UI.Views
         private void UpdateSummary()
         {
             long total = 0;
-            for (int i = 0; i < _items.Count; i++) total += _items[i].Size;
+            for (int i = 0; i < _items.Count; i++)
+            {
+                long size = _items[i].Size;
+                if (size > 0) total += size; // -1 = 目录体积仍在后台计算中
+            }
 
             _summary.Clear();
             _summary.Add("项目数", _items.Count + " 项");
@@ -297,9 +334,12 @@ namespace GuyueBox.UI.Views
             long total = 0;
             for (int i = 0; i < targets.Count; i++) total += targets[i].Size;
 
-            string message = "即将安全删除 " + targets.Count + " 个项目，合计 " + SysInfo.FormatSize(total) +
-                "，使用「覆盖 " + passes + " 次」方式。\r\n\r\n删除后内容将难以恢复，是否继续？";
-            if (!Dialog.Confirm(this, "确认粉碎", message)) return;
+            if (!Dialog.ConfirmDanger(this, "粉碎文件",
+                "对 " + targets.Count + " 个项目做 " + passes + " 次覆盖写入后删除。",
+                "不可撤销：覆盖写入后内容无法用任何数据恢复软件找回。",
+                "合计 " + SysInfo.FormatSize(total) + "；请先确认列表里没有需要保留的文件，该项不支持回收站。",
+                "开始粉碎", true))
+                return;
 
             _busy = true;
             UpdateActions();
@@ -367,20 +407,5 @@ namespace GuyueBox.UI.Views
             _clearButton.Enabled = !_busy && _items.Count > 0;
             _shredSelButton.Enabled = !_busy && _items.Count > 0;
             _shredAllButton.Enabled = !_busy && _items.Count > 0;
-        }
-
-        private void Post(ThreadStart action)
-        {
-            try
-            {
-                if (IsHandleCreated && !IsDisposed)
-                {
-                    BeginInvoke((MethodInvoker)delegate { action(); });
-                }
-            }
-            catch
-            {
-            }
-        }
-    }
+        }    }
 }

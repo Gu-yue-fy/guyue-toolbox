@@ -20,7 +20,8 @@ namespace GuyueBox.Core
         {
             lock (_lock)
             {
-                _lines.Add(DateTime.Now.ToString("MM-dd HH:mm:ss") + "  " + action.PadRight(8) + "  " + detail);
+                _lines.Add(DateTime.Now.ToString("MM-dd HH:mm:ss") + "  " +
+                    (action ?? "").PadRight(8) + "  " + (detail ?? ""));
                 _backupIds.Add(backupId ?? "");
                 if (_lines.Count > Cap)
                 {

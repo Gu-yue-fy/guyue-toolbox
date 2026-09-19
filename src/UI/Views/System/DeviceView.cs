@@ -35,7 +35,7 @@ namespace GuyueBox.UI.Views
 
             _disableButton = AddAction("禁用选中", "close", ButtonVariant.Danger, OnDisableClick, 120);
             _enableButton = AddAction("启用选中", "check", ButtonVariant.Primary, OnEnableClick, 120);
-            _refreshButton = AddAction("刷新", "refresh", ButtonVariant.Secondary, delegate { Load(true); }, 92);
+            _refreshButton = AddAction("刷新", "refresh", ButtonVariant.Secondary, delegate { Load(); }, 92);
 
             BuildGrid();
             BuildLayout();
@@ -74,7 +74,8 @@ namespace GuyueBox.UI.Views
 
         public override void OnActivated()
         {
-            if (!_loaded) { _loaded = true; Load(true); }
+            // _loaded 由 Load() 统一设置，此处不再重复赋值
+            if (!_loaded) Load();
         }
 
         // ---------------- 数据加载 ----------------
@@ -98,7 +99,7 @@ namespace GuyueBox.UI.Views
             }
         }
 
-        private void Load(bool force)
+        private void Load()
         {
             if (_busy) return;
             _busy = true;
@@ -217,11 +218,7 @@ namespace GuyueBox.UI.Views
 
         private DeviceInfo Selected
         {
-            get
-            {
-                if (_grid.SelectedRows.Count == 0) return null;
-                return _grid.SelectedRows[0].Tag as DeviceInfo;
-            }
+            get { return SelectedFrom<DeviceInfo>(_grid); }
         }
 
         private void UpdateActions()
@@ -284,17 +281,5 @@ namespace GuyueBox.UI.Views
         }
 
         private void OnDisableClick(object sender, EventArgs e) { SetDeviceState(false); }
-        private void OnEnableClick(object sender, EventArgs e) { SetDeviceState(true); }
-
-        private void Post(ThreadStart action)
-        {
-            try
-            {
-                if (IsHandleCreated && !IsDisposed) BeginInvoke(action);
-            }
-            catch
-            {
-            }
-        }
-    }
+        private void OnEnableClick(object sender, EventArgs e) { SetDeviceState(true); }    }
 }

@@ -1,0 +1,80 @@
+{
+  "_说明": "外部优化包清单示例。把本文件（或你自己的包）放到 <程序目录>\\packs\\ 或 %LOCALAPPDATA%\\GuyueBox\\packs\\ 即可在优化中心自动出现。",
+  "_格式": "pack/version/author/description/enabled + items[]；每个 item 含 id/group/name/desc/admin/risky/recommended/enabled + writes[]",
+  "_writes": "kind 支持 dword | qword | string | expand | multistring | binary(base64) | delete；hive 支持 HKCU/HKLM/HKCR/HKU/HKCC",
+  "_安全": "enabled=false 的包与条目不会被装载；外部包无法用重名 Id 覆盖内置优化项（内置优先）。",
+
+  "pack": "示例优化包",
+  "version": "1.0",
+  "author": "示例作者",
+  "description": "仅用于演示清单格式，默认禁用。把 enabled 改为 true 才会生效。",
+  "enabled": false,
+
+  "items": [
+    {
+      "id": "pack_demo_dword",
+      "group": "系统精简",
+      "name": "示例：写入一个 DWORD 值",
+      "desc": "演示 dword 类型写入（HKCU）。此条仅为格式示例。",
+      "admin": false,
+      "risky": false,
+      "recommended": false,
+      "enabled": true,
+      "writes": [
+        {
+          "hive": "HKCU",
+          "path": "Software\\GuyueBox\\PackDemo",
+          "name": "DemoFlag",
+          "kind": "dword",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "id": "pack_demo_multi",
+      "group": "扩展优化包",
+      "name": "示例：多类型写入 + 删除值",
+      "desc": "演示 string / expand / multistring / binary / delete 五种类型。此条仅为格式示例。",
+      "admin": true,
+      "risky": true,
+      "recommended": false,
+      "enabled": true,
+      "writes": [
+        {
+          "hive": "HKLM",
+          "path": "SOFTWARE\\GuyueBox\\PackDemo",
+          "name": "TextValue",
+          "kind": "string",
+          "value": "hello"
+        },
+        {
+          "hive": "HKCU",
+          "path": "Software\\GuyueBox\\PackDemo",
+          "name": "ExpandValue",
+          "kind": "expand",
+          "value": "%SystemRoot%\\System32"
+        },
+        {
+          "hive": "HKCU",
+          "path": "Software\\GuyueBox\\PackDemo",
+          "name": "MultiValue",
+          "kind": "multistring",
+          "value": ["a", "b", "c"]
+        },
+        {
+          "hive": "HKCU",
+          "path": "Software\\GuyueBox\\PackDemo",
+          "name": "BinaryValue",
+          "kind": "binary",
+          "value": "AQIDBA=="
+        },
+        {
+          "hive": "HKCU",
+          "path": "Software\\GuyueBox\\PackDemo",
+          "name": "ToBeRemoved",
+          "kind": "delete"
+        }
+      ]
+    }
+  ]
+}

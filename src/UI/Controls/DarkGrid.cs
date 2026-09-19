@@ -135,8 +135,6 @@ namespace GuyueBox.UI
 
             EnableHeadersVisualStyles = false;
             BorderStyle = BorderStyle.None;
-            BackgroundColor = Theme.CardBg;
-            GridColor = Theme.BorderSoft;
             CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
             ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None;
             RowHeadersVisible = false;
@@ -148,7 +146,6 @@ namespace GuyueBox.UI
             SelectionMode = DataGridViewSelectionMode.FullRowSelect;
             MultiSelect = false;
             AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
-            Font = Theme.FontBody;
             RowTemplate.Height = 32;
             ColumnHeadersHeight = 36;
             ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
@@ -171,30 +168,126 @@ namespace GuyueBox.UI
                 SortRowsByColumn(col, _sortAsc);
             };
 
-            ColumnHeadersDefaultCellStyle.BackColor = Theme.GridHeader;
-            ColumnHeadersDefaultCellStyle.ForeColor = Theme.TextMuted;
-            ColumnHeadersDefaultCellStyle.SelectionBackColor = Theme.GridHeader;
-            ColumnHeadersDefaultCellStyle.SelectionForeColor = Theme.TextMuted;
-            ColumnHeadersDefaultCellStyle.Font = Theme.FontSmall;
-            ColumnHeadersDefaultCellStyle.Padding = new Padding(8, 0, 0, 0);
-            ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleLeft;
-
-            DefaultCellStyle.BackColor = Theme.GridRow;
-            DefaultCellStyle.ForeColor = Theme.TextPrimary;
-            DefaultCellStyle.SelectionBackColor = Theme.GridSelection;
-            DefaultCellStyle.SelectionForeColor = Color.White;
-            DefaultCellStyle.Padding = new Padding(8, 0, 0, 0);
-            DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleLeft;
-
-            AlternatingRowsDefaultCellStyle.BackColor = Theme.GridRowAlt;
-            AlternatingRowsDefaultCellStyle.ForeColor = Theme.TextPrimary;
-            AlternatingRowsDefaultCellStyle.SelectionBackColor = Theme.GridSelection;
-            AlternatingRowsDefaultCellStyle.SelectionForeColor = Color.White;
-
             AdvancedCellBorderStyle.Left = DataGridViewAdvancedCellBorderStyle.None;
             AdvancedCellBorderStyle.Right = DataGridViewAdvancedCellBorderStyle.None;
             AdvancedCellBorderStyle.Top = DataGridViewAdvancedCellBorderStyle.None;
             AdvancedCellBorderStyle.Bottom = DataGridViewAdvancedCellBorderStyle.Single;
+
+            // 整行悬停高亮：DataGridView 没有内建"整行 hover"，
+            // 用 CellFormatting 在绘制时给悬停行着色——比逐行改样式省，也不破坏斑马纹。
+            // 已选中行保持选中色，不被悬停色覆盖。
+            CellMouseEnter += delegate (object s, DataGridViewCellEventArgs e)
+            {
+                if (e.RowIndex < 0 || e.RowIndex == _hoverRow) return;
+                int old = _hoverRow;
+                _hoverRow = e.RowIndex;
+                if (old >= 0) InvalidateRow(old);
+                InvalidateRow(e.RowIndex);
+            };
+            CellMouseLeave += delegate (object s, DataGridViewCellEventArgs e)
+            {
+                if (e.RowIndex < 0) return;
+                int old = _hoverRow;
+                _hoverRow = -1;
+                if (old >= 0) InvalidateRow(old);
+            };
+            CellFormatting += delegate (object s, DataGridViewCellFormattingEventArgs e)
+            {
+                if (e.RowIndex < 0 || e.RowIndex != _hoverRow || e.CellStyle == null) return;
+                if (Rows[e.RowIndex].Selected) return;
+                e.CellStyle.BackColor = Theme.GridHover;
+            };
+
+            ApplyTheme();
+        }
+
+        /// <summary>当前悬停行索引（-1 = 无）。CellFormatting 据此着色。</summary>
+        private int _hoverRow = -1;
+
+        /// <summary>
+        /// 把当前配色方案套用到表格样式。构造时调用一次；切换深/浅配色后
+        /// 由 ThemeSkin 再次调用——DataGridView 的颜色是写进样式对象的，
+        /// 不像自绘控件那样每帧读 Theme，必须显式重刷。
+        /// </summary>
+        public void ApplyTheme()
+        {
+            try
+            {
+                BackgroundColor = Theme.CardBg;
+                GridColor = Theme.RowBorder; // 行分隔用 Row.Border（设计 #334155），比 BorderSoft 更清晰
+                Font = Theme.FontBody;
+
+                ColumnHeadersDefaultCellStyle.BackColor = Theme.GridHeader;
+                ColumnHeadersDefaultCellStyle.ForeColor = Theme.TextMuted;
+                ColumnHeadersDefaultCellStyle.SelectionBackColor = Theme.GridHeader;
+                ColumnHeadersDefaultCellStyle.SelectionForeColor = Theme.TextMuted;
+                ColumnHeadersDefaultCellStyle.Font = Theme.FontSmall;
+                ColumnHeadersDefaultCellStyle.Padding = new Padding(8, 0, 0, 0);
+                ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleLeft;
+
+                DefaultCellStyle.BackColor = Theme.GridRow;
+                DefaultCellStyle.ForeColor = Theme.TextPrimary;
+                DefaultCellStyle.SelectionBackColor = Theme.GridSelection;
+                DefaultCellStyle.SelectionForeColor = Color.White;
+                DefaultCellStyle.Padding = new Padding(8, 0, 0, 0);
+                DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleLeft;
+
+                AlternatingRowsDefaultCellStyle.BackColor = Theme.GridRowAlt;
+                AlternatingRowsDefaultCellStyle.ForeColor = Theme.TextPrimary;
+                AlternatingRowsDefaultCellStyle.SelectionBackColor = Theme.GridSelection;
+                AlternatingRowsDefaultCellStyle.SelectionForeColor = Color.White;
+
+                Invalidate();
+            }
+            catch
+            {
+            }
+        }
+
+        /// <summary>
+        /// 重映射「逐行逐格显式设置过」的前景色 / 背景色。
+        /// 各页面填充数据时常写 cell.Style.ForeColor = Theme.TextPrimary 之类，这些值
+        /// 优先于 DefaultCellStyle，ApplyTheme 覆盖不到——切到浅色方案后就成了白底白字。
+        /// 故由 ThemeSkin 在切方案时显式再做一次 旧色→新色 映射。
+        /// </summary>
+        internal void RemapRowStyles(Color[] backFrom, Color[] backTo, Color[] foreFrom, Color[] foreTo)
+        {
+            try
+            {
+                for (int r = 0; r < Rows.Count; r++)
+                {
+                    DataGridViewRow row = Rows[r];
+                    if (row == null) continue;
+
+                    for (int c = 0; c < row.Cells.Count; c++)
+                    {
+                        DataGridViewCell cell = row.Cells[c];
+                        if (cell == null || !cell.HasStyle) continue; // 未显式设样式者跟随 DefaultCellStyle
+
+                        DataGridViewCellStyle st = cell.Style;
+                        st.ForeColor = MapSchemeColor(st.ForeColor, foreFrom, foreTo);
+                        st.BackColor = MapSchemeColor(st.BackColor, backFrom, backTo);
+                    }
+                }
+
+                Invalidate();
+            }
+            catch
+            {
+                // 表格可能正在重建行，忽略——下一次切主题会再试
+            }
+        }
+
+        private static Color MapSchemeColor(Color c, Color[] from, Color[] to)
+        {
+            if (c.IsEmpty || from == null || to == null) return c; // IsEmpty = 继承，不处理
+            int cur = c.ToArgb();
+            int n = Math.Min(from.Length, to.Length);
+            for (int i = 0; i < n; i++)
+            {
+                if (cur == from[i].ToArgb()) return to[i];
+            }
+            return c;
         }
 
         // ==============================================================
@@ -322,7 +415,7 @@ namespace GuyueBox.UI
             double diff = _scrollTarget - actual;
             if (Math.Abs(diff) < 0.06)
             {
-                int snap = (int)Math.Round(_scrollTarget);
+                int snap = (int)Math.Round((double)_scrollTarget);
                 if (actual != snap) { try { FirstDisplayedScrollingRowIndex = snap; } catch { } }
                 StopSmoothTimer();
                 return;

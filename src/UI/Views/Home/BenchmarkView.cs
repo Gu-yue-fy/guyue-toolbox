@@ -33,6 +33,7 @@ namespace GuyueBox.UI.Views
 
             AddAction("刷新", "refresh", ButtonVariant.Secondary, delegate { LoadHistory(); }, 92);
             _runButton = AddAction("开始测试", "bolt", ButtonVariant.Primary, OnRunClick, 116);
+            AddAction("前后对比", "gauge", ButtonVariant.Secondary, OnCompareClick, 116);
             AddAction("清空历史", "trash", ButtonVariant.Ghost, OnClearClick, 116);
 
             BuildControls();
@@ -148,6 +149,7 @@ namespace GuyueBox.UI.Views
                     r.DiskReadMBs.ToString("0") + " MB/s",
                     r.AesMBs > 0 ? r.AesMBs.ToString("0") + " MB/s" : "—",
                     r.Disk4kIops > 0 ? r.Disk4kIops.ToString("N0") + " IOPS" : "—");
+                _history.Rows[idx].Tag = r; // 供「前后对比」取出整条记录
                 if (i < 3) _history.Rows[idx].Cells[2].Style.ForeColor = i == 0 ? Theme.Success : Theme.Warning;
             }
             _history.ClearSelection();
@@ -229,9 +231,83 @@ namespace GuyueBox.UI.Views
             LoadHistory();
         }
 
+        /// <summary>
+        /// 前后对比：把两次测试的九个子项与综合评分做 diff 与百分比变化。
+        /// 页面副标题承诺了"对比优化前后"，只给排行榜是看不到"到底哪一项变快了"的。
+        /// 选中两行即对比这两次；否则默认对比最近两次。
+        /// </summary>
+        private void OnCompareClick(object sender, EventArgs e)
+        {
+            List<BenchmarkResult> list = Benchmark.Load();
+            if (list.Count < 2)
+            {
+                SetSubtitle("至少需要两次测试记录才能对比（当前 " + list.Count + " 次）。", Theme.TextSecondary);
+                return;
+            }
+
+            BenchmarkResult older = null;
+            BenchmarkResult newer = null;
+            if (_history.SelectedRows.Count >= 2)
+            {
+                BenchmarkResult a = _history.SelectedRows[0].Tag as BenchmarkResult;
+                BenchmarkResult b = _history.SelectedRows[1].Tag as BenchmarkResult;
+                if (a != null && b != null)
+                {
+                    // 按时间自动判定新旧：让用户随手选两行也不会看出反方向的变化
+                    if (a.When <= b.When) { older = a; newer = b; }
+                    else { older = b; newer = a; }
+                }
+            }
+            if (older == null)
+            {
+                newer = list[list.Count - 1];
+                older = list[list.Count - 2];
+            }
+
+            List<string> labels = new List<string>();
+            List<string> texts = new List<string>();
+            List<Color> tones = new List<Color>();
+
+            AddDiff(labels, texts, tones, "综合评分", older.Score, newer.Score, "N0", "");
+            AddDiff(labels, texts, tones, "CPU 单核", older.CpuSingleMops, newer.CpuSingleMops, "0.00", " M");
+            AddDiff(labels, texts, tones, "CPU 多核", older.CpuMultiMops, newer.CpuMultiMops, "0.00", " M");
+            AddDiff(labels, texts, tones, "内存顺序读", older.MemReadMBs, newer.MemReadMBs, "0", " MB/s");
+            AddDiff(labels, texts, tones, "内存顺序写", older.MemWriteMBs, newer.MemWriteMBs, "0", " MB/s");
+            AddDiff(labels, texts, tones, "磁盘顺序读", older.DiskReadMBs, newer.DiskReadMBs, "0", " MB/s");
+            AddDiff(labels, texts, tones, "磁盘顺序写", older.DiskWriteMBs, newer.DiskWriteMBs, "0", " MB/s");
+            AddDiff(labels, texts, tones, "AES-256 加密", older.AesMBs, newer.AesMBs, "0", " MB/s");
+            AddDiff(labels, texts, tones, "GZip 压缩", older.GzipMBs, newer.GzipMBs, "0", " MB/s");
+            AddDiff(labels, texts, tones, "磁盘 4K 随机读", older.Disk4kIops, newer.Disk4kIops, "N0", " IOPS");
+
+            Dialog.Sections(this,
+                "前后对比：" + older.When.ToString("MM-dd HH:mm") + " → " + newer.When.ToString("MM-dd HH:mm"),
+                "gauge", Theme.Accent, labels.ToArray(), texts.ToArray(), tones.ToArray());
+        }
+
+        /// <summary>把一项的「旧 → 新（变化%）」追加为一段；变化方向决定文字颜色。</summary>
+        private static void AddDiff(List<string> labels, List<string> texts, List<Color> tones,
+            string name, double before, double after, string format, string unit)
+        {
+            if (before <= 0 && after <= 0) return; // 该项两次都没数据：跳过，而不是写一个 0 误导
+
+            double pct = before > 0 ? (after - before) * 100.0 / before : 0;
+            if (Math.Abs(pct) < 1.0) pct = 0;      // 1% 以内视为基准波动，不作为结论
+
+            string arrow = pct > 0 ? "↑" : (pct < 0 ? "↓" : "→");
+            labels.Add(name);
+            texts.Add(before.ToString(format) + unit + "  →  " + after.ToString(format) + unit +
+                "    " + arrow + " " + (pct == 0 ? "基本持平" : (pct > 0 ? "+" : "") + pct.ToString("0.0") + "%"));
+            // 变快用成功色、变慢用警告色；噪声区间不着色
+            tones.Add(pct == 0 ? Theme.TextSecondary : (pct > 0 ? Theme.Success : Theme.Warning));
+        }
+
         private void OnClearClick(object sender, EventArgs e)
         {
-            if (!Dialog.Confirm(this, "清空历史", "确定清空全部基准测试历史记录吗？此操作不可撤销。"))
+            if (!Dialog.ConfirmDanger(this, "清空测试历史",
+                "删除全部基准测试记录（含排行榜数据）。",
+                "不可撤销：CSV 记录直接删除，没有备份。",
+                "只影响本页的历史与最高分；不影响已应用的优化项。",
+                "清空", true))
                 return;
             Benchmark.ClearHistory();
             LoadHistory();
@@ -241,20 +317,5 @@ namespace GuyueBox.UI.Views
         private void UpdateActions()
         {
             _runButton.Enabled = !_busy;
-        }
-
-        private void Post(ThreadStart action)
-        {
-            try
-            {
-                if (IsHandleCreated && !IsDisposed)
-                {
-                    BeginInvoke((MethodInvoker)delegate { action(); });
-                }
-            }
-            catch
-            {
-            }
-        }
-    }
+        }    }
 }

@@ -19,7 +19,7 @@ namespace GuyueBox.UI.Views
     /// </summary>
     public abstract class ViewBase : Panel
     {
-        public const int HeaderHeight = 92;
+        public const int HeaderHeight = Theme.HeaderHeight;
 
         private readonly BufferPanel _header;
         private readonly ScrollHost _scroll;
@@ -48,7 +48,8 @@ namespace GuyueBox.UI.Views
             Body.WrapContents = false;
             Body.AutoScroll = false;
             Body.BackColor = Theme.WindowBg;
-            Body.Padding = new Padding(30, 20, 30, 18);
+            Body.Padding = new Padding(Theme.PagePadX, Theme.PagePadTop,
+                Theme.PagePadX, Theme.PagePadBottom);
             Body.SetBounds(0, 0, 400, 400);
 
             _scroll = new ScrollHost();
@@ -109,7 +110,7 @@ namespace GuyueBox.UI.Views
         public bool EmbedHeader { get; set; }
 
         /// <summary>嵌入模式下保留的操作按钮条高度（只隐藏标题，不隐藏操作按钮）。</summary>
-        public const int ActionBarHeight = 46;
+        public const int ActionBarHeight = Theme.ActionBarHeight;
 
         private int EffectiveHeader
         {
@@ -121,9 +122,18 @@ namespace GuyueBox.UI.Views
             get { return _scroll.ViewportHeight; }
         }
 
-        /// <summary>内容尺寸变化后通知滚动容器重新测量。</summary>
+        /// <summary>
+        /// 内容尺寸变化后重新测量：
+        /// 强制走完整的「重测行高 + Body 重新堆叠」路径，而不是仅通知滚动容器。
+        /// 否则行高在挂载后才定型时（概览卡回填数据、筛选切换可见性），
+        /// 其后各行会停留在过期坐标，表现为行与行相互压叠。
+        /// </summary>
         public void RefreshLayout()
         {
+            // 注意：此处不能强制 LayoutRows(true)。
+            // 实测强制完整重测会让 Body 与 ScrollHost 的宽度互相触发，反而放大错位（8px → 19px）。
+            // 行错位的正解是「行高在挂载前定稿」+ 短路分支补 PerformLayout（见 LayoutRows / AddRow）。
+            LayoutRows();
             _scroll.Relayout();
         }
 
@@ -180,7 +190,7 @@ namespace GuyueBox.UI.Views
                     _cascPos += 0.13f;
                     bool done = _cascPos >= 1f;
                     if (done) _cascPos = 1f;
-                    float t = 1f - (1f - _cascPos) * (1f - _cascPos) * (1f - _cascPos);
+                    float t = Theme.Ease.CubicOut(_cascPos);
                     for (int i = 0; i < _cascControls.Count; i++)
                     {
                         Control c = _cascControls[i];
@@ -266,11 +276,93 @@ namespace GuyueBox.UI.Views
             SetSubtitle(text, color);
         }
 
+        /// <summary>
+        /// 把后台线程的结果切回 UI 线程执行（返回是否成功投递）。
+        /// 原先 20+ 个视图各自复制一份同名的私有 Post，现统一收在基类：
+        /// 句柄未创建 / 已销毁时静默丢弃，不抛异常——后台任务扫完时窗口可能已关闭。
+        /// </summary>
+        // 不引入 System.Threading：它会与 System.Windows.Forms.Timer 争夺 Timer 这个名字
+        protected bool Post(System.Threading.ThreadStart action)
+        {
+            try
+            {
+                if (IsHandleCreated && !IsDisposed)
+                {
+                    BeginInvoke((MethodInvoker)delegate { action(); });
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 取表格当前选中行绑定的数据对象；未选中时返回 null。
+        /// 原先 5 个页面各自复制了一份同名 Selected 属性，现统一收在此处。
+        /// </summary>
+        protected T SelectedFrom<T>(DarkGrid grid) where T : class
+        {
+            if (grid == null || grid.SelectedRows.Count == 0) return null;
+            return grid.SelectedRows[0].Tag as T;
+        }
+
+        /// <summary>
+        /// 「统计条 + 表格」布局的标准高度重算。
+        /// 原先 6 个页面逐字重复同一段逻辑（只在额外占位高度与最小高度上不同），现参数化收在此处。
+        /// </summary>
+        /// <param name="grid">撑满剩余高度的表格</param>
+        /// <param name="summary">顶部统计条</param>
+        /// <param name="extraUsed">统计条之外还需占掉的额外高度（如搜索行 34+18）</param>
+        /// <param name="minHeight">表格最小高度</param>
+        protected void LayoutGrid(DarkGrid grid, StatStrip summary, int extraUsed, int minHeight)
+        {
+            int summaryH = summary.PreferredHeight;
+            summary.Height = summaryH;
+            Control row = summary.Parent;
+            if (row != null) row.Height = summaryH;
+
+            // 42 = 提示条高度，18 = 提示条与统计条各自的下方间距
+            int used = Body.Padding.Top + Body.Padding.Bottom + 42 + 18 + summaryH + 18 + extraUsed;
+            int avail = ViewportHeight - used;
+            if (avail < minHeight) avail = minHeight;
+
+            if (grid.Height != avail) grid.Height = avail;
+            grid.Invalidate();
+            RefreshLayout();
+        }
+
         protected void SetSubtitle(string text, Color color)
         {
             _subtitle = text == null ? "" : text;
             _subtitleColor = color;
             if (_header != null) _header.Invalidate();
+        }
+
+        /// <summary>
+        /// 瞬时操作反馈（成功 / 需注意 / 失败）。
+        /// 与 <see cref="SetSubtitle"/> 分工：副标题是常驻页头的"当前状态"，
+        /// Toast 是"刚发生了什么"的结果——在主窗体可用时走浮层，不抢焦点、自动消失。
+        /// </summary>
+        protected void Toast(string title, string sub, ToastKind kind)
+        {
+            MainForm form = MainForm.Current;
+            if (form != null)
+            {
+                form.ShowToast(title, sub, kind);
+                return;
+            }
+            // 无主窗体（如单独构造页面的探测/测试）：退化为页头副标题，信息不丢失
+            SetSubtitle(title + (string.IsNullOrEmpty(sub) ? "" : " " + sub),
+                kind == ToastKind.Success ? Theme.Success
+                : kind == ToastKind.Danger ? Theme.Danger
+                : kind == ToastKind.Warning ? Theme.Warning : Theme.Accent);
+        }
+
+        protected void Toast(string title, string sub)
+        {
+            Toast(title, sub, ToastKind.Info);
         }
 
         protected override void Dispose(bool disposing)
@@ -298,9 +390,10 @@ namespace GuyueBox.UI.Views
             b.Text = text;
             b.IconKind = icon;
             b.Variant = variant;
-            b.Height = 34;
+            b.Height = Theme.ActionButtonHeight;
             b.FitToText(96);
             if (width > 0) b.Width = width;
+            b.NaturalWidth = b.Width; // 记录原始宽度：窄窗口收缩后据此还原，避免累计变窄
             if (onClick != null) b.Click += onClick;
             _actions.Add(b);
             _header.Controls.Add(b);
@@ -327,17 +420,50 @@ namespace GuyueBox.UI.Views
             return b;
         }
 
-        /// <summary>操作按钮宽度变化后重新排列（从右向左）。</summary>
+        /// <summary>
+        /// 操作按钮排列（从右向左）。
+        /// 按钮总宽超出可用宽度时按比例收缩（保留下限），文字过长由按钮内部自动省略号处理。
+        /// 不可无限左移：窄窗口下按钮会被排到负坐标，跑出可视区并压住页面标题。
+        /// </summary>
         protected void LayoutActions()
         {
-            int x = _header.Width - 26;
-            int y = Math.Max(2, (EffectiveHeader - 34) / 2); // 按钮在头部高度内垂直居中
+            if (_actions.Count == 0) return;
+
+            const int rightPad = 26;      // 距右边缘
+            const int titleReserve = 150; // 给页面标题预留的最小宽度，避免标题被完全挤没
+            const int minButton = 58;     // 按钮收缩下限（仍能容纳图标）
+
+            int gap = Theme.GapTight;
+            int y = Math.Max(2, (EffectiveHeader - Theme.ActionButtonHeight) / 2);
+
+            int[] want = new int[_actions.Count];
+            int total = 0;
+            for (int i = 0; i < _actions.Count; i++)
+            {
+                AccentButton b = _actions[i];
+                want[i] = b.NaturalWidth > 0 ? b.NaturalWidth : b.Width;
+                total += want[i];
+            }
+
+            int usable = _header.Width - rightPad - titleReserve - gap * (_actions.Count - 1);
+            if (usable < 0) usable = 0;
+            bool shrink = total > usable && total > 0;
+            double ratio = shrink ? (double)usable / total : 1.0;
+
+            int x = _header.Width - rightPad;
             for (int i = _actions.Count - 1; i >= 0; i--)
             {
                 AccentButton b = _actions[i];
-                x -= b.Width;
+                int w = want[i];
+                if (shrink)
+                {
+                    w = (int)Math.Floor(w * ratio);
+                    if (w < minButton) w = minButton;
+                }
+                if (b.Width != w) b.Width = w;
+                x -= w;
                 b.Location = new Point(x, y);
-                x -= 10;
+                x -= gap;
             }
         }
 
@@ -349,6 +475,27 @@ namespace GuyueBox.UI.Views
             using (SolidBrush b = new SolidBrush(Theme.WindowBg))
             {
                 g.FillRectangle(b, _header.ClientRectangle);
+            }
+
+            // 页头的"高科技"细节（纯叠加绘制，不改任何布局，因此所有页面一次性受益）：
+            // ① 顶部一条从中间向两侧淡出的强调色光带；② 标题区一团低 alpha 柔光。
+            // 分段插值而不是 LinearGradientBrush：与工程既有做法一致，且不引入新的绘制依赖。
+            int hw = Math.Max(4, _header.Width);
+            const int segs = 48;
+            for (int i = 0; i < segs; i++)
+            {
+                int x0 = hw * i / segs;
+                int x1 = hw * (i + 1) / segs;
+                // 中间最亮、两端为 0：形成"光从中间打过来"的观感
+                double t = 1.0 - Math.Abs((i + 0.5) / segs - 0.5) * 2.0;
+                int alpha = (int)(t * 130);
+                if (alpha <= 2) continue;
+                g.FillRectangle(GdiCache.Brush(Gfx.Alpha(Theme.Accent, alpha)), x0, 0, x1 - x0, 2);
+            }
+
+            using (SolidBrush glow = new SolidBrush(Gfx.Alpha(Theme.Accent, 14)))
+            {
+                g.FillEllipse(glow, 4, -34, 300, 92);
             }
 
             // 嵌入模式（合并页子页）：只画按钮条背景，不画标题/副标题（外层已有）
@@ -424,6 +571,12 @@ namespace GuyueBox.UI.Views
             return MakeRowCore(height, bottomGap, "row");
         }
 
+        /// <summary>同上，使用标准区块间距（新页面推荐用这个重载，保持全站节奏一致）。</summary>
+        protected static FlowLayoutPanel MakeRow(int height)
+        {
+            return MakeRowCore(height, Theme.GapSection, "row");
+        }
+
         /// <summary>创建一个行高固定的横向行容器。</summary>
         protected static FlowLayoutPanel MakeRowFixed(int height, int bottomGap)
         {
@@ -453,22 +606,45 @@ namespace GuyueBox.UI.Views
             LayoutRows();
         }
 
+        /// <summary>同上，使用标准区块间距（新页面推荐用这个重载）。</summary>
+        protected void AddFull(Control c, int height)
+        {
+            AddFull(c, height, Theme.GapSection);
+        }
+
         protected void AddRow(FlowLayoutPanel row)
         {
             Body.Controls.Add(row);
             LayoutRows();
         }
 
-        protected void AddSpacer(int height)
+        /// <summary>
+        /// 把「右对齐的计数 / 状态标签」放进容器可视区内。
+        ///
+        /// 不可写成 <c>label.SetBounds(Math.Max(420, W - w - 4), ...)</c>：容器比 420 窄时
+        /// x 被强行抬到 420，标签会被推到右边界之外、完全看不见。
+        /// 这里用「默认右对齐 → 不压住左侧控件 → 不越出右边界」三级夹取，
+        /// 空间实在不足时贴右边界，任何宽度下都可见。
+        /// </summary>
+        /// <param name="label">要摆放的标签</param>
+        /// <param name="containerWidth">所在容器宽度</param>
+        /// <param name="avoidLeft">左侧需避让的控件右边界（如搜索框 240 + 间距 8）</param>
+        /// <param name="y">纵向位置</param>
+        /// <param name="height">高度</param>
+        protected static void LayoutRightLabel(Control label, int containerWidth, int avoidLeft, int y, int height)
         {
-            Panel p = new Panel();
-            p.BackColor = Theme.WindowBg;
-            p.Height = height;
-            p.Margin = new Padding(0);
-            p.Tag = "stretch";
-            Body.Controls.Add(p);
-            LayoutRows();
+            if (label == null || containerWidth <= 0) return;
+
+            int w = label.Width;
+            int lx = containerWidth - w - 4;   // 默认：右对齐、右边留 4px
+            if (lx < avoidLeft) lx = avoidLeft; // 不压住左侧控件
+            int hi = containerWidth - w;        // 上限：不越出右边界
+            if (lx > hi) lx = hi;
+            if (lx < 0) lx = 0;
+            label.SetBounds(lx, y, w, height);
         }
+
+
 
         private bool _suspendRowLayout;
 
@@ -485,11 +661,24 @@ namespace GuyueBox.UI.Views
         {
             _suspendRowLayout = false;
             LayoutRows();
+            // 批量挂载收尾再对齐一次：挂载期间重排被抑制，先挂载的控件的最终高度
+            // 与后挂载控件的坐标之间会留下错位（全部优化项页曾因此出现组头与首行 5px 重叠）。
+            Body.PerformLayout();
         }
 
         private int _lastAvailWidth = -1;
 
         protected void LayoutRows()
+        {
+            LayoutRows(false);
+        }
+
+        /// <summary>
+        /// force = true 时跳过「宽度未变」短路，强制重测每个行容器的高度并让 Body 重新堆叠。
+        /// 内容更新（概览卡数据回填、筛选可见性变化等）会在行挂载之后才改变行高，
+        /// 而短路分支不重测行高 → 其后已定位的行会停在过期坐标（实测被压上 5~19px）。
+        /// </summary>
+        private void LayoutRows(bool force)
         {
             if (_laying || _suspendRowLayout) return;
             _laying = true;
@@ -500,13 +689,18 @@ namespace GuyueBox.UI.Views
                 // 但必须补齐 stretch 行宽度：立即渲染的行挂载时 Body 宽度可能早已定型
                 //（不再触发 Resize），若不补，新行会保持默认 200px 宽 → 行宽塌陷。
                 // Width 同值赋值在 WinForms 内部会被短路，157 行遍历为纳秒级。
-                if (avail > 0 && avail == _lastAvailWidth)
+                if (!force && avail > 0 && avail == _lastAvailWidth)
                 {
                     for (int i = 0; i < Body.Controls.Count; i++)
                     {
                         Control c = Body.Controls[i];
                         if ((c.Tag as string) == "stretch" && c.Width != avail) c.Width = avail;
                     }
+                    // 行的最终高度可能是上一次 LayoutRowChildren 才定下来的（如 row 高度取最高子控件），
+                    // 而「高度变化」不会自动让 Body 重新堆叠 → 其后所有行会停留在过期坐标，
+                    // 表现为行与行重叠（设置页曾出现 9px 重叠）。
+                    // 这里显式重排一次：代价 O(子项数)，且只在挂载/改宽时发生。
+                    Body.PerformLayout();
                     _scroll.Relayout();
                     return;
                 }
@@ -563,7 +757,7 @@ namespace GuyueBox.UI.Views
                 return;
             }
 
-            int gap = 16;
+            int gap = Theme.GapInline;
             int avail = row.ClientSize.Width;
             int w = (avail - gap * (n - 1)) / n;
             if (w < 80) w = 80;

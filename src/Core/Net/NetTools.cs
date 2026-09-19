@@ -304,87 +304,40 @@ namespace GuyueBox.Core
 
         // ---------------- 常用修复动作 ----------------
 
-        public static string FlushDns()
+        // 修复动作统一返回 Shell.Result：调用方用 ExitCode（r.Ok）判定成败，
+        // 不再依赖命令输出里的英文 "fail" 关键字（中文系统 netsh/ipconfig 输出为本地化文本）。
+        public static Shell.Result FlushDns()
         {
-            Shell.Result r = Shell.Run("ipconfig.exe", "/flushdns", 30000);
-            return string.IsNullOrEmpty(r.All) ? "本地 DNS 解析缓存已刷新。" : r.All;
+            return Shell.Run("ipconfig.exe", "/flushdns", 30000);
         }
 
-        public static string RenewDhcp()
+        public static Shell.Result RenewDhcp()
         {
-            StringBuilder sb = new StringBuilder();
             Shell.Result a = Shell.Run("ipconfig.exe", "/release", 60000);
-            sb.AppendLine(a.All);
             Shell.Result b = Shell.Run("ipconfig.exe", "/renew", 120000);
-            sb.Append(b.All);
-            string text = sb.ToString().Trim();
-            return string.IsNullOrEmpty(text) ? "IP 地址已重新获取。" : text;
-        }
-
-        public static string ResetWinsock()
-        {
-            Shell.Result r = Shell.Run("netsh.exe", "winsock reset", 60000);
-            return string.IsNullOrEmpty(r.All)
-                ? "Winsock 目录已重置，需要重启计算机后生效。"
-                : r.All + "\r\n\r\n（需要重启计算机后生效）";
-        }
-
-        public static string ResetTcpIp()
-        {
-            Shell.Result r = Shell.Run("netsh.exe", "int ip reset", 60000);
-            return string.IsNullOrEmpty(r.All)
-                ? "TCP/IP 协议栈已重置，需要重启计算机后生效。"
-                : r.All + "\r\n\r\n（需要重启计算机后生效）";
-        }
-
-        public static string ClearArpCache()
-        {
-            Shell.Result r = Shell.Netsh("interface ip delete arpcache");
-            return string.IsNullOrEmpty(r.All) ? "ARP 缓存已清空。" : r.All;
-        }
-
-        public static string SetDns(string adapterName, string primary, string secondary)
-        {
-            string args = "interface ip set dns name=\"" + adapterName + "\" static " + primary + " primary";
-            Shell.Result r1 = Shell.Netsh(args);
+            Shell.Result r = new Shell.Result();
+            r.ExitCode = a.Ok && b.Ok ? 0 : (a.ExitCode != 0 ? a.ExitCode : b.ExitCode);
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine(r1.All);
-
-            if (!string.IsNullOrWhiteSpace(secondary))
-            {
-                Shell.Result r2 = Shell.Netsh("interface ip add dns name=\"" + adapterName + "\" " + secondary + " index=2");
-                sb.AppendLine(r2.All);
-            }
-            string text = sb.ToString().Trim();
-            return string.IsNullOrEmpty(text) ? "DNS 服务器已更新。" : text;
+            if (!string.IsNullOrEmpty(a.All)) sb.AppendLine(a.All);
+            if (!string.IsNullOrEmpty(b.All)) sb.Append(b.All);
+            r.Output = sb.ToString().Trim();
+            r.Error = (a.Error + "\r\n" + b.Error).Trim();
+            return r;
         }
 
-        public static string SetDnsAutomatic(string adapterName)
+        public static Shell.Result ResetWinsock()
         {
-            Shell.Result r = Shell.Netsh("interface ip set dns name=\"" + adapterName + "\" source=dhcp");
-            return string.IsNullOrEmpty(r.All) ? "DNS 已恢复为自动获取。" : r.All;
+            return Shell.Run("netsh.exe", "winsock reset", 60000);
         }
 
-        /// <summary>应用一套保守的 TCP 调优参数。</summary>
-        public static string ApplyTcpTuning()
+        public static Shell.Result ResetTcpIp()
         {
-            StringBuilder sb = new StringBuilder();
-            sb.AppendLine(Shell.Netsh("int tcp set global autotuninglevel=normal").All);
-            sb.AppendLine(Shell.Netsh("int tcp set global ecncapability=enabled").All);
-            sb.AppendLine(Shell.Netsh("int tcp set global rss=enabled").All);
-            sb.AppendLine(Shell.Netsh("int tcp set global timestamps=disabled").All);
-            sb.AppendLine(Shell.Netsh("int tcp set heuristics disabled").All);
-            string text = sb.ToString().Trim();
-            return string.IsNullOrEmpty(text) ? "TCP 参数已优化。" : text;
+            return Shell.Run("netsh.exe", "int ip reset", 60000);
         }
 
-        public static string RestoreTcpDefaults()
+        public static Shell.Result ClearArpCache()
         {
-            StringBuilder sb = new StringBuilder();
-            sb.AppendLine(Shell.Netsh("int tcp set global autotuninglevel=normal").All);
-            sb.AppendLine(Shell.Netsh("int tcp set heuristics default").All);
-            string text = sb.ToString().Trim();
-            return string.IsNullOrEmpty(text) ? "TCP 参数已恢复系统默认。" : text;
+            return Shell.Netsh("interface ip delete arpcache");
         }
 
         /// <summary>
@@ -417,39 +370,5 @@ namespace GuyueBox.Core
             return result;
         }
 
-        public static string GetIpConfig()
-        {
-            Shell.Result r = Shell.Run("ipconfig.exe", "/all", 30000);
-            return r.All;
-        }
-
-        /// <summary>探测本机公网出口（仅读取，不发送任何数据）。</summary>
-        public static List<string> GetLocalDnsServers()
-        {
-            List<string> servers = new List<string>();
-            try
-            {
-                NetworkInterface[] nics = NetworkInterface.GetAllNetworkInterfaces();
-                for (int i = 0; i < nics.Length; i++)
-                {
-                    if (nics[i].OperationalStatus != OperationalStatus.Up) continue;
-                    try
-                    {
-                        foreach (IPAddress d in nics[i].GetIPProperties().DnsAddresses)
-                        {
-                            string s = d.ToString();
-                            if (!servers.Contains(s)) servers.Add(s);
-                        }
-                    }
-                    catch
-                    {
-                    }
-                }
-            }
-            catch
-            {
-            }
-            return servers;
-        }
     }
 }

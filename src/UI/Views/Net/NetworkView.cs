@@ -54,13 +54,17 @@ namespace GuyueBox.UI.Views
             _diag.Caption = "网络诊断";
             _diag.IconKind = "shield";
             _diag.CaptionColor = Theme.Accent;
+            // 诊断结果要用户点「开始诊断」后才有：空状态必须给指引，不能留一片空白
+            _diag.EmptyText = "尚未诊断——点击页头「开始诊断」，结果会显示在这里。";
 
             _dnsInfo.Caption = "DNS 配置";
             _dnsInfo.IconKind = "doc";
             _dnsInfo.CaptionColor = Theme.Cyan;
+            _dnsInfo.EmptyText = "正在读取网卡与 DNS 配置…";
             _mtuInfo.Caption = "MTU 与链路";
             _mtuInfo.IconKind = "network";
             _mtuInfo.CaptionColor = Theme.Success;
+            _mtuInfo.EmptyText = "正在读取接口 MTU…";
 
             _diagButton = AddAction("开始诊断", "shield", ButtonVariant.Primary, OnDiagClick, 128);
             AddAction("刷新 DNS 缓存", "clean", ButtonVariant.Secondary, delegate { RunRepair("刷新 DNS 缓存", delegate { return NetTools.FlushDns(); }, false); }, 150);
@@ -109,11 +113,13 @@ namespace GuyueBox.UI.Views
             FlowLayoutPanel dnsRow = MakeRow(0, 14);
             dnsRow.Controls.Add(MakeLabel("DNS 切换", 84, true));
             _adapterBox.DropDownStyle = ComboBoxStyle.DropDownList;
-            _adapterBox.Size = new Size(220, 30);
+            // 宽度按最小窗口（内容区约 807px）反推：本行合计必须装得下，
+            // 否则 FlowLayoutPanel（不换行）会把最右的「当前：…」整段裁掉。
+            _adapterBox.Size = new Size(180, 30);
             _adapterBox.SelectedIndexChanged += delegate { UpdateCurrentDns(); };
             dnsRow.Controls.Add(_adapterBox);
             _presetBox.DropDownStyle = ComboBoxStyle.DropDownList;
-            _presetBox.Size = new Size(180, 30);
+            _presetBox.Size = new Size(150, 30);
             for (int i = 0; i < DnsSwitch.Presets.Length; i++) _presetBox.Items.Add(DnsSwitch.Presets[i].Name);
             if (_presetBox.Items.Count > 0) _presetBox.SelectedIndex = 0;
             dnsRow.Controls.Add(_presetBox);
@@ -134,6 +140,7 @@ namespace GuyueBox.UI.Views
             portRow.Controls.Add(MakeLabel("端口占用", 84, true));
             _portInput.BorderStyle = BorderStyle.FixedSingle;
             _portInput.Size = new Size(130, 30);
+            Native.SetCue(_portInput, "端口号");
             _portInput.Font = Theme.FontBody;
             _portInput.KeyPress += delegate (object s, KeyPressEventArgs e)
             {
@@ -505,7 +512,7 @@ namespace GuyueBox.UI.Views
 
         // ---------------- 修复 ----------------
 
-        private void RunRepair(string title, Func<string> action, bool needReboot)
+        private void RunRepair(string title, Func<Shell.Result> action, bool needReboot)
         {
             if (_busy) return;
             if (needReboot && !Dialog.Confirm(this, title,
@@ -515,29 +522,22 @@ namespace GuyueBox.UI.Views
             SetSubtitle("正在执行：" + title + "…", Theme.Warning);
             ThreadPool.QueueUserWorkItem(delegate
             {
-                string output = "";
-                try { output = action() ?? ""; }
-                catch (Exception ex) { output = ex.Message; }
+                Shell.Result r;
+                try { r = action(); }
+                catch (Exception ex)
+                {
+                    r = new Shell.Result();
+                    r.ExitCode = -1;
+                    r.Error = ex.Message;
+                }
                 Post(delegate
                 {
                     _busy = false;
-                    bool ok = output.IndexOf("fail", StringComparison.OrdinalIgnoreCase) < 0;
-                    Dialog.Output(this, title, output.Length > 0 ? output : "执行完成。");
+                    bool ok = r.Ok; // 用进程退出码判定（ExitCode==0），不依赖本地化输出文本
+                    Dialog.Output(this, title, r.All.Length > 0 ? r.All : "执行完成。");
                     SetSubtitle(title + " 已执行" + (needReboot ? "，重启后完全生效。" : "。"),
                         ok ? Theme.Success : Theme.Warning);
                 });
             });
-        }
-
-        private void Post(ThreadStart action)
-        {
-            try
-            {
-                if (IsHandleCreated && !IsDisposed) BeginInvoke(action);
-            }
-            catch
-            {
-            }
-        }
-    }
+        }    }
 }

@@ -15,6 +15,9 @@ namespace GuyueBox.UI.Views
         private readonly NoticeBar _notice = new NoticeBar();
 
         private readonly List<StartupItem> _items = new List<StartupItem>();
+        private readonly TextBox _search = new TextBox();
+        /// <summary>指向文件已不存在的启动项命令：后台加载时一次算好（见 CollectMissing），供填充与统计复用。</summary>
+        private HashSet<string> _missing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private bool _suppress;
         private bool _busy;
 
@@ -29,11 +32,14 @@ namespace GuyueBox.UI.Views
             _summary.IconKind = "startup";
             _summary.CaptionColor = Theme.Warning;
 
-            AddAction("刷新", "refresh", ButtonVariant.Secondary, delegate { Load(true); }, 92);
+            AddAction("刷新", "refresh", ButtonVariant.Secondary, delegate { Load(); }, 92);
             AddAction("全部启用", "check", ButtonVariant.Ghost, OnEnableAll, 110);
             AddAction("全部禁用", "shield", ButtonVariant.Ghost, OnDisableAll, 110);
             AddAction("打开所在位置", "folder", ButtonVariant.Ghost, OnOpenLocation, 130);
             AddAction("删除选中项", "trash", ButtonVariant.Danger, OnDeleteClick, 120);
+            AddAction("启用选中项", "check", ButtonVariant.Ghost, OnEnableSelected, 120);
+            AddAction("禁用选中项", "shield", ButtonVariant.Ghost, OnDisableSelected, 120);
+            AddAction("复制命令", "copy", ButtonVariant.Ghost, OnCopyCommand, 110);
 
             BuildGrid();
             BuildLayout();
@@ -72,6 +78,22 @@ namespace GuyueBox.UI.Views
             row.Controls.Add(_summary);
             AddRow(row);
 
+            FlowLayoutPanel searchRow = MakeRow(30, 10);
+            Label sl = new Label();
+            sl.Text = "搜索：";
+            sl.ForeColor = Theme.TextSecondary;
+            sl.Font = Theme.FontBody;
+            sl.AutoSize = true;
+            sl.Margin = new Padding(0, 0, 8, 0);
+            searchRow.Controls.Add(sl);
+            _search.BorderStyle = BorderStyle.FixedSingle;
+            _search.Font = Theme.FontBody;
+            _search.Size = new Size(240, 28);
+            Native.SetCue(_search, "搜索启动项…");
+            _search.TextChanged += delegate { ApplyFilter(); };
+            searchRow.Controls.Add(_search);
+            AddRow(searchRow);
+
             AddFull(_grid, 340, 0);
 
             Body.Resize += delegate { Relayout(); };
@@ -85,7 +107,7 @@ namespace GuyueBox.UI.Views
             Control row = _summary.Parent;
             if (row != null) row.Height = summaryHeight;
 
-            int used = Body.Padding.Top + Body.Padding.Bottom + 42 + 18 + summaryHeight + 18;
+            int used = Body.Padding.Top + Body.Padding.Bottom + 42 + 18 + summaryHeight + 18 + 30 + 10;
             int avail = ViewportHeight - used;
             if (avail < 190) avail = 190;
 
@@ -97,10 +119,33 @@ namespace GuyueBox.UI.Views
 
         public override void OnActivated()
         {
-            if (_items.Count == 0) Load(false);
+            if (_items.Count == 0) Load();
         }
 
-        private void Load(bool force)
+        /// <summary>
+        /// 在后台线程一次性判定哪些启动项指向的文件已不存在（每个项一次 File.Exists），
+        /// 避免填充表格、以及之后每次勾选变化都在 UI 线程重复发 IO。
+        /// </summary>
+        private static HashSet<string> CollectMissing(List<StartupItem> items)
+        {
+            HashSet<string> missing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (items == null) return missing;
+            for (int i = 0; i < items.Count; i++)
+            {
+                StartupItem it = items[i];
+                if (it == null || string.IsNullOrEmpty(it.Command)) continue;
+                try
+                {
+                    if (!StartupManager.CommandExists(it.Command)) missing.Add(it.Command);
+                }
+                catch
+                {
+                }
+            }
+            return missing;
+        }
+
+        private void Load()
         {
             if (_busy) return;
             _busy = true;
@@ -109,10 +154,12 @@ namespace GuyueBox.UI.Views
             ThreadPool.QueueUserWorkItem(delegate
             {
                 List<StartupItem> loaded = null;
+                HashSet<string> missing = null;
                 string error = null;
                 try
                 {
                     loaded = StartupManager.Load();
+                    missing = CollectMissing(loaded);
                 }
                 catch (Exception ex)
                 {
@@ -127,6 +174,10 @@ namespace GuyueBox.UI.Views
                         SetSubtitle("读取启动项失败：" + error, Theme.Danger);
                         return;
                     }
+
+                    _missing = missing != null
+                        ? missing
+                        : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                     _items.Clear();
                     _items.AddRange(loaded);
@@ -151,7 +202,7 @@ namespace GuyueBox.UI.Views
                 DataGridViewRow row = _grid.Rows[idx];
                 row.Tag = it;
 
-                if (!StartupManager.CommandExists(it.Command))
+                if (_missing.Contains(it.Command))
                 {
                     row.Cells[4].Style.ForeColor = Theme.Danger;
                     row.Cells[4].Value = it.Command + "   [文件不存在]";
@@ -170,6 +221,7 @@ namespace GuyueBox.UI.Views
 
             _suppress = false;
             _grid.ClearSelection();
+            ApplyFilter();
         }
 
         private void OnCellValueChanged(object sender, DataGridViewCellEventArgs e)
@@ -244,11 +296,104 @@ namespace GuyueBox.UI.Views
             Dialog.Warn(this, "无法定位文件", "该启动项指向的文件不存在：\r\n" + exe);
         }
 
+        /// <summary>按搜索框过滤列表：名称 / 来源 / 发布者 / 启动命令 任一包含关键词即保留（不区分大小写）。</summary>
+        private void ApplyFilter()
+        {
+            string q = _search.Text.Trim();
+            StringComparison cmp = StringComparison.OrdinalIgnoreCase;
+            for (int i = 0; i < _grid.Rows.Count; i++)
+            {
+                DataGridViewRow r = _grid.Rows[i];
+                StartupItem it = r.Tag as StartupItem;
+                bool show = true;
+                if (q.Length > 0 && it != null)
+                {
+                    show = (it.Name != null && it.Name.IndexOf(q, cmp) >= 0)
+                        || (it.SourceText != null && it.SourceText.IndexOf(q, cmp) >= 0)
+                        || (it.Publisher != null && it.Publisher.IndexOf(q, cmp) >= 0)
+                        || (it.Command != null && it.Command.IndexOf(q, cmp) >= 0);
+                }
+                r.Visible = show;
+            }
+        }
+
+        private void OnEnableSelected(object sender, EventArgs e)
+        {
+            ApplyChecked(true);
+        }
+
+        private void OnDisableSelected(object sender, EventArgs e)
+        {
+            ApplyChecked(false);
+        }
+
+        /// <summary>对勾选的启动项批量启用 / 禁用（只处理可切换且状态不符的项）。</summary>
+        private void ApplyChecked(bool enable)
+        {
+            if (_items.Count == 0) return;
+            List<StartupItem> targets = new List<StartupItem>();
+            for (int i = 0; i < _grid.Rows.Count; i++)
+            {
+                if (!_grid.Rows[i].Visible) continue;
+                bool chk = false;
+                try { chk = Convert.ToBoolean(_grid.Rows[i].Cells[0].Value); }
+                catch { }
+                if (!chk) continue;
+                StartupItem it = _grid.Rows[i].Tag as StartupItem;
+                if (it != null && it.CanToggle && it.Enabled != enable) targets.Add(it);
+            }
+            if (targets.Count == 0)
+            {
+                SetSubtitle(enable ? "没有勾选可启用的启动项。" : "没有勾选可禁用的启动项。", Theme.TextSecondary);
+                return;
+            }
+
+            _busy = true;
+            SetSubtitle(enable ? "正在启用选中项…" : "正在禁用选中项…", Theme.Warning);
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                int ok = 0, fail = 0;
+                for (int i = 0; i < targets.Count; i++)
+                {
+                    if (StartupManager.SetEnabled(targets[i], enable)) ok++; else fail++;
+                }
+                Post(delegate
+                {
+                    _busy = false;
+                    Load();
+                    SetSubtitle((enable ? "已启用 " : "已禁用 ") + ok + " 个选中项" +
+                        (fail > 0 ? "，" + fail + " 个失败。" : "。"), fail > 0 ? Theme.Warning : Theme.Success);
+                });
+            });
+        }
+
+        private void OnCopyCommand(object sender, EventArgs e)
+        {
+            StartupItem it = SelectedItem();
+            if (it == null)
+            {
+                Dialog.Info(this, "未选择", "请先在列表中选择一个启动项。");
+                return;
+            }
+            try
+            {
+                Clipboard.SetText(it.Command ?? "");
+                SetSubtitle("已复制启动命令：" + it.Name, Theme.Success);
+            }
+            catch
+            {
+                Dialog.Error(this, "复制失败", "无法访问剪贴板。");
+            }
+        }
+
         private void OnEnableAll(object sender, EventArgs e)
         {
             if (_items.Count == 0) return;
-            if (!Dialog.Confirm(this, "全部启用",
-                "确定要启用全部可切换的启动项吗？\r\n启用后这些程序会在开机时自动运行。"))
+            if (!Dialog.ConfirmDanger(this, "全部启用启动项",
+                "把全部可切换的启动项设为启用，这些程序将在开机时自动运行。",
+                "可撤销：可随时再点「全部禁用」，或逐项关闭。",
+                "会明显延长开机时间，具体取决于启用的程序数量。",
+                "全部启用", false))
                 return;
             ApplyBatch(true);
         }
@@ -266,8 +411,11 @@ namespace GuyueBox.UI.Views
                 Dialog.Info(this, "无启用项", "当前没有已启用的启动项可禁用。");
                 return;
             }
-            if (!Dialog.Confirm(this, "全部禁用",
-                "确定要禁用全部可切换的启动项吗？\r\n\r\n禁用后开机速度会更快，但相关软件将不再随系统自动启动（可随时重新启用）。"))
+            if (!Dialog.ConfirmDanger(this, "全部禁用启动项",
+                "把全部可切换的启动项设为禁用，相关软件不再随系统自动启动。",
+                "可撤销：状态随启动项记录保存，可随时重新启用。",
+                "开机更快；但安全软件、输入法、驱动管理类程序的自启动也会被一并关闭，请自行判断。",
+                "全部禁用", false))
                 return;
             ApplyBatch(false);
         }
@@ -293,7 +441,7 @@ namespace GuyueBox.UI.Views
                 Post(delegate
                 {
                     _busy = false;
-                    Load(true);
+                    Load();
                     SetSubtitle((enable ? "已启用 " : "已禁用 ") + ok + " 个启动项" +
                         (fail > 0 ? "，" + fail + " 个失败。" : "。"),
                         fail > 0 ? Theme.Warning : Theme.Success);
@@ -310,16 +458,16 @@ namespace GuyueBox.UI.Views
                 return;
             }
 
-            string message = "确定要删除启动项「" + it.Name + "」吗？\r\n\r\n" +
-                "位置：" + it.Location + "\r\n" +
-                "命令：" + it.Command + "\r\n\r\n" +
-                "删除后该程序将不再随系统启动，此操作不可撤销。";
-
-            if (!Dialog.Confirm(this, "删除启动项", message)) return;
+            if (!Dialog.ConfirmDanger(this, "删除启动项",
+                "删除「" + it.Name + "」的启动记录，该程序不再随系统自动启动。",
+                "不可撤销：本工具不为启动项删除建备份，需要时只能重新手动添加。",
+                "位置：" + it.Location + "\r\n命令：" + it.Command,
+                "删除", true))
+                return;
 
             if (StartupManager.Delete(it))
             {
-                Load(true);
+                Load();
                 SetSubtitle("已删除启动项：" + it.Name, Theme.Success);
             }
             else
@@ -336,7 +484,7 @@ namespace GuyueBox.UI.Views
             for (int i = 0; i < _items.Count; i++)
             {
                 if (_items[i].Enabled) enabled++; else disabled++;
-                if (!StartupManager.CommandExists(_items[i].Command)) missing++;
+                if (_missing.Contains(_items[i].Command)) missing++;
             }
 
             _summary.Clear();
@@ -346,20 +494,5 @@ namespace GuyueBox.UI.Views
             _summary.Add("无效项", missing + " 项", missing > 0 ? Theme.Danger : Theme.TextPrimary);
             _summary.Invalidate();
             Relayout();
-        }
-
-        private void Post(ThreadStart action)
-        {
-            try
-            {
-                if (IsHandleCreated && !IsDisposed)
-                {
-                    BeginInvoke((MethodInvoker)delegate { action(); });
-                }
-            }
-            catch
-            {
-            }
-        }
-    }
+        }    }
 }

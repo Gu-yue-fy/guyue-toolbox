@@ -260,22 +260,5 @@ namespace GuyueBox.UI.Views
             _toggleButton.Invalidate();
             SetSubtitle("已恢复系统默认调度。", Theme.TextSecondary);
             RefreshCurrent();
-        }
-
-        private bool Post(ThreadStart action)
-        {
-            try
-            {
-                if (IsHandleCreated && !IsDisposed)
-                {
-                    BeginInvoke((MethodInvoker)delegate { action(); });
-                    return true;
-                }
-            }
-            catch
-            {
-            }
-            return false;
-        }
-    }
+        }    }
 }

@@ -31,8 +31,10 @@ namespace GuyueBox.UI
     /// <summary>圆角面板 / 卡片容器。</summary>
     public class RoundPanel : BufferPanel
     {
-        private int _radius = 12;
-        private Color _borderColor = Theme.Border;
+        private int _radius = Theme.RadiusCard;
+        // 设计卡片材质：玻璃层用「半透明白描边」（Card.Border #15FFFFFF）而非不透明灰边，
+        // 配合 8px 圆角与顶部 1px 内高光，形成克制的玻璃承载层。
+        private Color _borderColor = Theme.GlassBorder;
         private Color _cornerColor = Theme.WindowBg;
         private bool _showBorder = true;
         private bool _highlight = true;
@@ -157,7 +159,7 @@ namespace GuyueBox.UI
             if (!string.IsNullOrEmpty(_icon))
             {
                 Rectangle box = new Rectangle(16, 13, 22, 22);
-                Gfx.FillRound(g, box, 6, Gfx.Alpha(_iconColor, 32));
+                Gfx.FillRound(g, box, Theme.RadiusChip, Gfx.Alpha(_iconColor, 32));
                 IconPainter.Draw(g, _icon, new Rectangle(20, 17, 14, 14), _iconColor);
                 x = 46;
             }
@@ -192,6 +194,8 @@ namespace GuyueBox.UI
         Secondary,
         Danger,
         Ghost,
+        /// <summary>琥珀：有破坏性但可撤销的操作（设计语义：红=删除/禁用，琥珀=可回退）。</summary>
+        Warning,
         Success
     }
 
@@ -200,8 +204,21 @@ namespace GuyueBox.UI
     {
         private bool _hover;
         private bool _pressed;
+
+        // 悬停 / 按下的过渡进度（0..1）：鼠标事件只改目标值，由 Timer 逐帧插值。
+        // 对齐设计主按钮的「hover 150ms 颜色 + press 100ms」三段式，避免状态瞬间跳变
+        private float _hoverP;
+        private float _pressP;
+        private Timer _anim;
+        private int _animStart;
+        private float _hoverFrom;
+        private float _pressFrom;
+        private int _hoverDur;
+        private bool _paintBackColor;
+        private bool _selected;
+        private int _naturalWidth;
         private ButtonVariant _variant = ButtonVariant.Secondary;
-        private int _radius = 7;
+        private int _radius = Theme.RadiusButton; // 设计 Token.Radius.Button = 4（精密而非圆润）
         private string _icon = "";
 
         public AccentButton()
@@ -213,7 +230,43 @@ namespace GuyueBox.UI
             Font = Theme.FontBody;
             Cursor = Cursors.Hand;
             Size = new Size(100, 32);
+            A11y.MakeFocusable(this, AccessibleRole.PushButton);
         }
+
+        protected override void OnTextChanged(EventArgs e)
+        {
+            base.OnTextChanged(e);
+            try { AccessibleName = Text; } catch { }
+        }
+
+        /// <summary>Enter 立即激活；空格在抬起时激活（与系统按钮一致）。</summary>
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Enter && Enabled)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                OnClick(EventArgs.Empty);
+                return;
+            }
+            if (e.KeyCode == Keys.Space) { e.Handled = true; e.SuppressKeyPress = true; return; }
+            base.OnKeyDown(e);
+        }
+
+        protected override void OnKeyUp(KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Space && Enabled)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                OnClick(EventArgs.Empty);
+                return;
+            }
+            base.OnKeyUp(e);
+        }
+
+        protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+        protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
 
         public ButtonVariant Variant
         {
@@ -233,6 +286,32 @@ namespace GuyueBox.UI
             set { _icon = value == null ? "" : value; Invalidate(); }
         }
 
+        /// <summary>
+        /// 色板模式：直接以自身 BackColor 作为圆角填充。
+        /// 变体着色路径只用 Parent.BackColor 铺底、再按变体取色，**从不使用自身 BackColor**——
+        /// 因此"设置 BackColor 当颜色块"必须显式开启本模式，否则色块一片空白
+        /// （设置页的主题色选择器曾因此完全看不到颜色）。
+        /// </summary>
+        public bool PaintBackColor
+        {
+            get { return _paintBackColor; }
+            set { _paintBackColor = value; Invalidate(); }
+        }
+
+        /// <summary>选中态：色板模式下以加粗描边标记当前选中项。</summary>
+        public bool Selected
+        {
+            get { return _selected; }
+            set { _selected = value; Invalidate(); }
+        }
+
+        /// <summary>自然宽度：页头在窄窗口下收缩排布时用它还原，避免反复收缩累计变窄。</summary>
+        public int NaturalWidth
+        {
+            get { return _naturalWidth; }
+            set { _naturalWidth = value; }
+        }
+
         /// <summary>按文字实际宽度调整按钮宽度，避免文字被截断。</summary>
         public void FitToText()
         {
@@ -245,12 +324,13 @@ namespace GuyueBox.UI
             int w = (_icon.Length > 0) ? textWidth + 46 : textWidth + 28;
             if (w < minimumWidth) w = minimumWidth;
             if (Width != w) Width = w;
+            _naturalWidth = w;
         }
 
         protected override void OnMouseEnter(EventArgs e)
         {
             _hover = true;
-            Invalidate();
+            StartAnim();
             base.OnMouseEnter(e);
         }
 
@@ -258,22 +338,83 @@ namespace GuyueBox.UI
         {
             _hover = false;
             _pressed = false;
-            Invalidate();
+            StartAnim();
             base.OnMouseLeave(e);
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
             _pressed = true;
-            Invalidate();
+            StartAnim();
             base.OnMouseDown(e);
         }
 
         protected override void OnMouseUp(MouseEventArgs e)
         {
             _pressed = false;
-            Invalidate();
+            StartAnim();
             base.OnMouseUp(e);
+        }
+
+        /// <summary>
+        /// 启动悬停 / 按下的过渡插值。用 Environment.TickCount 计算已过时间（不是 tick 累加，避免漂移），
+        /// 关闭动效或未启用时直接取终值。
+        /// </summary>
+        private void StartAnim()
+        {
+            if (_anim == null)
+            {
+                _anim = new Timer { Interval = 16 };
+                _anim.Tick += OnAnimTick;
+            }
+
+            // 尊重「减少动效」设置：直接落位，不做过渡
+            bool motion = Enabled && AppSettings.Animations;
+            if (!motion)
+            {
+                _anim.Stop();
+                _hoverP = _hover ? 1f : 0f;
+                _pressP = _pressed ? 1f : 0f;
+                Invalidate();
+                return;
+            }
+
+            _hoverFrom = _hoverP;
+            _pressFrom = _pressP;
+            // 退出比进入慢一点（120 / 160），收得更稳
+            _hoverDur = _hover ? Theme.Motion.HoverIn : Theme.Motion.HoverOut;
+            _animStart = Environment.TickCount;
+            _anim.Start();
+            Invalidate();
+        }
+
+        private void OnAnimTick(object sender, EventArgs e)
+        {
+            try
+            {
+                if (IsDisposed || Disposing) { _anim.Stop(); return; }
+
+                int elapsed = Environment.TickCount - _animStart;
+                float th = Theme.Ease.CubicOut((float)elapsed / _hoverDur);
+                float tp = Theme.Ease.CubicOut((float)elapsed / Theme.Motion.Press);
+
+                _hoverP = _hoverFrom + ((_hover ? 1f : 0f) - _hoverFrom) * th;
+                _pressP = _pressFrom + ((_pressed ? 1f : 0f) - _pressFrom) * tp;
+
+                Invalidate();
+
+                if (elapsed >= _hoverDur && elapsed >= Theme.Motion.Press)
+                {
+                    _hoverP = _hover ? 1f : 0f;
+                    _pressP = _pressed ? 1f : 0f;
+                    _anim.Stop();
+                    Invalidate();
+                }
+            }
+            catch
+            {
+                try { _anim.Stop(); } catch { }
+            }
         }
 
         protected override void OnEnabledChanged(EventArgs e)
@@ -283,34 +424,66 @@ namespace GuyueBox.UI
             base.OnEnabledChanged(e);
         }
 
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                // 过渡动画进行中销毁控件时必须停表并释放定时器：
+                // 否则定时器继续触发、持有已释放的控件（与 ToggleSwitch / ScrollHost 的处理一致）
+                if (_anim != null)
+                {
+                    _anim.Stop();
+                    _anim.Dispose();
+                    _anim = null;
+                }
+            }
+            base.Dispose(disposing);
+        }
+
         private void ResolveColors(out Color fill, out Color text, out Color border)
         {
-            border = Color.Empty;
+            // 三态色（静止 / 悬停 / 按下）→ 按 hoverP、pressP 两级插值，
+            // 让状态切换是渐变而不是瞬间跳变。
+            // 注意：Ghost 的静止态是透明，必须用 BlendArgb（Blend 会把 alpha 固定成 255）
+            Color rest, hover, press;
+            Color restText, hoverText;
+            Color restBorder = Color.Empty, hoverBorder = Color.Empty;
+
             switch (_variant)
             {
                 case ButtonVariant.Primary:
-                    fill = _pressed ? Theme.AccentPress : (_hover ? Theme.AccentHover : Theme.Accent);
-                    text = Color.White;
+                    rest = Theme.Accent; hover = Theme.AccentHover; press = Theme.AccentPress;
+                    // 设计：强调蓝偏亮，用深墨文字才达到可读对比（TextOnAccent #0F172A），而非白色
+                    restText = Theme.TextOnAccent; hoverText = Theme.TextOnAccent;
                     break;
                 case ButtonVariant.Danger:
-                    fill = _pressed ? Gfx.Shade(Theme.Danger, 0.85) : (_hover ? Theme.DangerHover : Theme.Danger);
-                    text = Color.White;
+                    rest = Theme.Danger; hover = Theme.DangerHover; press = Gfx.Shade(Theme.Danger, 0.85);
+                    restText = Color.White; hoverText = Color.White;
+                    break;
+                case ButtonVariant.Warning:
+                    // 琥珀比强调蓝亮，同样用深墨文字才够对比
+                    rest = Theme.Warning; hover = Gfx.Shade(Theme.Warning, 1.12); press = Gfx.Shade(Theme.Warning, 0.85);
+                    restText = Theme.TextOnAccent; hoverText = Theme.TextOnAccent;
                     break;
                 case ButtonVariant.Success:
-                    fill = _pressed ? Gfx.Shade(Theme.Success, 0.85) : (_hover ? Gfx.Shade(Theme.Success, 1.12) : Theme.Success);
-                    text = Color.FromArgb(10, 28, 18);
+                    rest = Theme.Success; hover = Gfx.Shade(Theme.Success, 1.12); press = Gfx.Shade(Theme.Success, 0.85);
+                    restText = Color.FromArgb(10, 28, 18); hoverText = Color.FromArgb(10, 28, 18);
                     break;
                 case ButtonVariant.Ghost:
-                    fill = _pressed ? Theme.CardBgAlt : (_hover ? Gfx.Alpha(Theme.Border, 90) : Color.Transparent);
-                    text = _hover ? Theme.TextPrimary : Theme.TextSecondary;
-                    border = _hover ? Theme.BorderStrong : Color.Empty;
+                    rest = Color.Transparent; hover = Gfx.Alpha(Theme.Border, 90); press = Theme.CardBgAlt;
+                    restText = Theme.TextSecondary; hoverText = Theme.TextPrimary;
+                    hoverBorder = Theme.BorderStrong;
                     break;
                 default:
-                    fill = _pressed ? Gfx.Shade(Theme.CardBgAlt, 0.92) : (_hover ? Theme.CardHover : Theme.CardBgAlt);
-                    text = _hover ? Theme.TextPrimary : Theme.TextSecondary;
-                    border = _hover ? Theme.BorderStrong : Theme.Border;
+                    rest = Theme.CardBgAlt; hover = Theme.CardHover; press = Gfx.Shade(Theme.CardBgAlt, 0.92);
+                    restText = Theme.TextSecondary; hoverText = Theme.TextPrimary;
+                    restBorder = Theme.Border; hoverBorder = Theme.BorderStrong;
                     break;
             }
+
+            fill = Gfx.BlendArgb(Gfx.BlendArgb(rest, hover, _hoverP), press, _pressP);
+            text = Gfx.BlendArgb(restText, hoverText, _hoverP);
+            border = Gfx.BlendArgb(restBorder, hoverBorder, _hoverP);
 
             if (!Enabled)
             {
@@ -331,7 +504,17 @@ namespace GuyueBox.UI
             }
 
             Color fill, text, border;
-            ResolveColors(out fill, out text, out border);
+            if (_paintBackColor)
+            {
+                // 色板模式：直接用自身 BackColor 作填充（变体着色路径不会用到 BackColor）
+                fill = Gfx.Blend(BackColor, Gfx.Shade(BackColor, 0.82), _pressP);
+                text = Theme.TextPrimary;
+                border = (_selected || _hover) ? Theme.TextPrimary : Theme.Border;
+            }
+            else
+            {
+                ResolveColors(out fill, out text, out border);
+            }
 
             Rectangle r = new Rectangle(0, 0, Width - 1, Height - 1);
             if (fill.A > 0)
@@ -340,7 +523,7 @@ namespace GuyueBox.UI
             }
             if (border != Color.Empty && border.A > 0)
             {
-                Gfx.StrokeRound(g, r, _radius, border, 1f);
+                Gfx.StrokeRound(g, r, _radius, border, (_paintBackColor && _selected) ? 2f : 1f);
             }
 
             int textLeft = 10;
@@ -354,6 +537,9 @@ namespace GuyueBox.UI
 
             Gfx.DrawTextCenter(g, Text, Font, text,
                 new Rectangle(textLeft, 0, Math.Max(0, textRight - textLeft), Height));
+
+            // 焦点可视：键盘用户必须看得出当前焦点在哪个按钮上
+            if (Focused) A11y.DrawFocusRing(g, r, _radius);
         }
     }
 
@@ -372,7 +558,41 @@ namespace GuyueBox.UI
             Size = new Size(44, 32);
             Cursor = Cursors.Hand;
             BackColor = Theme.ChromeBg;
+            A11y.MakeFocusable(this, AccessibleRole.PushButton);
+            // 标题栏按钮只有图形，读屏需要文字名
+            AccessibleName = icon == "min" ? "最小化"
+                : icon == "max" ? "最大化"
+                : icon == "restore" ? "还原窗口"
+                : icon == "close" ? "关闭" : "";
         }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                OnClick(EventArgs.Empty);
+                return;
+            }
+            if (e.KeyCode == Keys.Space) { e.Handled = true; e.SuppressKeyPress = true; return; }
+            base.OnKeyDown(e);
+        }
+
+        protected override void OnKeyUp(KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Space)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                OnClick(EventArgs.Empty);
+                return;
+            }
+            base.OnKeyUp(e);
+        }
+
+        protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+        protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
 
         public Color HoverColor
         {
@@ -414,6 +634,8 @@ namespace GuyueBox.UI
 
             Color iconColor = _hover && _hoverColor == Theme.Danger ? Color.White : Theme.TextSecondary;
             IconPainter.Draw(g, _icon, new Rectangle((Width - 11) / 2, (Height - 11) / 2, 11, 11), iconColor);
+
+            if (Focused) A11y.DrawFocusRing(g, new Rectangle(0, 0, Width - 1, Height - 1), 6);
         }
     }
 
@@ -457,14 +679,15 @@ namespace GuyueBox.UI
             }
 
             Rectangle r = new Rectangle(0, 0, Width - 1, Height - 1);
+            // 设计 Token.Radius.Badge = 4：徽标是精密小方块而非胶囊
             if (_filled)
             {
-                Gfx.FillRound(g, r, Height / 2, _badgeColor);
+                Gfx.FillRound(g, r, Theme.RadiusChip, _badgeColor);
             }
             else
             {
-                Gfx.FillRound(g, r, Height / 2, Gfx.Alpha(_badgeColor, 30));
-                Gfx.StrokeRound(g, r, Height / 2, Gfx.Alpha(_badgeColor, 110), 1f);
+                Gfx.FillRound(g, r, Theme.RadiusChip, Gfx.Alpha(_badgeColor, 30));
+                Gfx.StrokeRound(g, r, Theme.RadiusChip, Gfx.Alpha(_badgeColor, 110), 1f);
             }
 
             Gfx.DrawTextCenter(g, Text, Font, _filled ? Color.White : _badgeColor, ClientRectangle);
@@ -648,10 +871,10 @@ namespace GuyueBox.UI
         public NoticeBar()
         {
             BackColor = Theme.CardBg;
-            Radius = 9;
+            Radius = Theme.RadiusItem;
             Height = 34;
             CornerColor = Theme.WindowBg;
-            BorderColor = Theme.Border;
+            BorderColor = Theme.GlassBorder;
             Highlight = false;
         }
 
@@ -880,6 +1103,9 @@ namespace GuyueBox.UI
         /// <summary>统一动画钟：进度条与数字滚动共用一条 EaseOutCubic 时间线。</summary>
         private void StartCardAnim()
         {
+            // 每次（重新）启动动画都把时间线归零：否则完成后面 _animPos 停在 1.0，
+            // 连续 SetData（仪表盘实时刷新）会让后续动画首帧即 done、只瞬跳到终值不播放过渡。
+            _animPos = 0f;
             if (_anim == null)
             {
                 _anim = new System.Windows.Forms.Timer { Interval = 16 };
@@ -924,7 +1150,7 @@ namespace GuyueBox.UI
 
             // 图标底
             Rectangle iconBox = new Rectangle(16, 14, 28, 28);
-            Gfx.FillRound(g, iconBox, 8, Gfx.Alpha(AccentColor, 36));
+            Gfx.FillRound(g, iconBox, Theme.RadiusItem, Gfx.Alpha(AccentColor, 36));
             IconPainter.Draw(g, IconKind, new Rectangle(23, 21, 14, 14), AccentColor);
 
             using (SolidBrush b = new SolidBrush(Theme.TextSecondary))
@@ -964,7 +1190,13 @@ namespace GuyueBox.UI
         {
             public string Label = "";
             public string Value = "";
-            public Color ValueColor = Theme.TextPrimary;
+
+            /// <summary>
+            /// 数值色；Color.Empty 表示「跟随主题默认前景色」（绘制时实时解析）。
+            /// 不可用 Theme.TextPrimary 作字段初始化器——那会把加项当刻的方案色快照进来，
+            /// 切换到浅色方案后仍是深色方案的近白色，落在白色卡片上就是白底白字。
+            /// </summary>
+            public Color ValueColor = Color.Empty;
         }
 
         private readonly List<Item> _items = new List<Item>();
@@ -989,9 +1221,10 @@ namespace GuyueBox.UI
             _items.Clear();
         }
 
+        /// <summary>加一项，数值使用主题默认前景色（绘制时解析，自动跟随主题切换）。</summary>
         public void Add(string label, string value)
         {
-            Add(label, value, Theme.TextPrimary);
+            Add(label, value, Color.Empty);
         }
 
         public void Add(string label, string value, Color valueColor)
@@ -1001,6 +1234,36 @@ namespace GuyueBox.UI
             it.Value = value == null ? "" : value;
             it.ValueColor = valueColor;
             _items.Add(it);
+        }
+
+        /// <summary>
+        /// 方案切换后重解析本控件的主题相关颜色。
+        /// Item.ValueColor / CaptionColor 是「加项时快照」进字段的值，不经控件的
+        /// BackColor/ForeColor 重映射（见 ThemeSkin.Reload），必须显式再做一次 旧色→新色 映射，
+        /// 否则会残留旧方案的颜色（浅色下表现为白底白字）。
+        /// </summary>
+        internal void RemapThemeColors(Color[] from, Color[] to)
+        {
+            if (from == null || to == null) return;
+
+            CaptionColor = RemapOne(CaptionColor, from, to);
+            for (int i = 0; i < _items.Count; i++)
+            {
+                _items[i].ValueColor = RemapOne(_items[i].ValueColor, from, to);
+            }
+            Invalidate();
+        }
+
+        private static Color RemapOne(Color c, Color[] from, Color[] to)
+        {
+            if (c.IsEmpty) return c; // 跟随默认前景色，绘制时解析
+            int cur = c.ToArgb();
+            int n = Math.Min(from.Length, to.Length);
+            for (int i = 0; i < n; i++)
+            {
+                if (cur == from[i].ToArgb()) return to[i];
+            }
+            return c;
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -1018,7 +1281,7 @@ namespace GuyueBox.UI
                 if (!string.IsNullOrEmpty(IconKind))
                 {
                     Rectangle box = new Rectangle(16, 13, 22, 22);
-                    Gfx.FillRound(g, box, 6, Gfx.Alpha(CaptionColor, 32));
+                    Gfx.FillRound(g, box, Theme.RadiusChip, Gfx.Alpha(CaptionColor, 32));
                     IconPainter.Draw(g, IconKind, new Rectangle(20, 17, 14, 14), CaptionColor);
                     x = 46;
                 }
@@ -1036,7 +1299,15 @@ namespace GuyueBox.UI
                 }
             }
 
-            if (_items.Count == 0) return;
+            if (_items.Count == 0)
+            {
+                // 数据项为空时不留下大片空白：不少页面要等数据加载完成才 Add 数据项，
+                // 这段空窗期若只画标题，就是一张「只有标题的空白卡片」，看起来像界面坏了。
+                // 给一句弱化说明，语义与设计的 EmptyState 一致。
+                Gfx.DrawTextEllipsis(g, "数据加载中…", Theme.FontSmall, Theme.TextMuted,
+                    new Rectangle(16, top + Math.Max(0, (Height - top) / 2 - 10), Math.Max(40, Width - 32), 20));
+                return;
+            }
 
             int area = Height - top;
             int colWidth = Math.Max(60, (Width - 32) / _items.Count);
@@ -1049,7 +1320,8 @@ namespace GuyueBox.UI
                 Gfx.DrawTextEllipsis(g, it.Label, Theme.FontSmall, Theme.TextMuted,
                     new Rectangle(x, top + area / 2 - 22, colWidth - 12, 18));
 
-                Gfx.DrawTextEllipsis(g, it.Value, Theme.FontSubTitle, it.ValueColor,
+                Color valueColor = it.ValueColor.IsEmpty ? Theme.TextPrimary : it.ValueColor;
+                Gfx.DrawTextEllipsis(g, it.Value, Theme.FontSubTitle, valueColor,
                     new Rectangle(x, top + area / 2 - 2, colWidth - 12, 24));
             }
         }

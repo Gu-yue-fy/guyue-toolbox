@@ -25,8 +25,9 @@ namespace GuyueBox.Core
             list.Add(MakeService("SysMain", "SysMain (超级预读取)",
                 "预加载常用程序以加速启动。在固态硬盘上收益有限，禁用可释放内存。", true, false));
 
+            // 禁用索引是真实取舍（搜索会变慢），标为有风险即可，不进「一键推荐」
             list.Add(MakeService("WSearch", "Windows Search 索引",
-                "为文件内容建立搜索索引。禁用后搜索会变慢，但可显著降低磁盘占用。", true, true));
+                "为文件内容建立搜索索引。禁用后搜索会变慢，但可显著降低磁盘占用。", false, true));
 
             list.Add(MakeService("RemoteRegistry", "远程注册表",
                 "允许远程修改本机注册表，存在安全风险，建议禁用。", true, false));
@@ -97,6 +98,14 @@ namespace GuyueBox.Core
                 "按需联网检索设备驱动与元数据。驱动已装齐后可禁用（新设备将无法自动装驱动）。", false, false));
             list.Add(MakeService("wercplsupport", "问题报告与解决方案",
                 "为「问题报告与解决」控制面板拉取错误报告数据。", false, false));
+
+            // —— 补充 3 个服务项 ——
+            list.Add(MakeService("Spooler", "打印后台处理程序",
+                "管理打印队列。没有打印机/扫描仪时可禁用；禁用后无法打印（也会影响部分「打印为 PDF」功能）。", false, true));
+            list.Add(MakeService("bthserv", "蓝牙支持服务",
+                "蓝牙设备支持。使用蓝牙耳机/键鼠/手柄时请勿禁用。", false, true));
+            list.Add(MakeService("WerSvc", "Windows 错误报告服务",
+                "程序崩溃后收集并上报错误报告。禁用可减少崩溃后的磁盘写入与后台上报。", true, false));
 
             // 内置老旧驱动禁用（来自游戏系统包，按值照搬）
             RegTweak legacyDrivers = new RegTweak();

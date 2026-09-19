@@ -53,7 +53,8 @@ namespace GuyueBox.Core
             };
             list.Add(highPerf);
 
-            // 快速启动改为 RegTweak：走 RegHelper 备份链（旧版 reg.exe 直写无备份、还原硬编码 =1 会丢系统原值）
+            // 快速启动走 RegTweak 而非 reg.exe 直写：只有 RegTweak 会进 RegHelper 备份链，
+            // 还原时才能写回系统原值；硬编码还原成 1 会丢掉原值。
             RegTweak fastBoot = new RegTweak();
             fastBoot.IdValue = "disable_fast_startup";
             fastBoot.GroupValue = GPower;

@@ -72,18 +72,7 @@ namespace GuyueBox.UI.Views
 
         private void Relayout()
         {
-            int summaryH = _summary.PreferredHeight;
-            _summary.Height = summaryH;
-            Control row = _summary.Parent;
-            if (row != null) row.Height = summaryH;
-
-            int used = Body.Padding.Top + Body.Padding.Bottom + 42 + 18 + summaryH + 18;
-            int avail = ViewportHeight - used;
-            if (avail < 200) avail = 200;
-
-            if (_grid.Height != avail) _grid.Height = avail;
-            _grid.Invalidate();
-            RefreshLayout();
+            LayoutGrid(_grid, _summary, 0, 200);
         }
 
         public override void OnActivated()
@@ -134,11 +123,7 @@ namespace GuyueBox.UI.Views
 
         private ContextEntry Selected
         {
-            get
-            {
-                if (_grid.SelectedRows.Count == 0) return null;
-                return _grid.SelectedRows[0].Tag as ContextEntry;
-            }
+            get { return SelectedFrom<ContextEntry>(_grid); }
         }
 
         private void UpdateActions()
@@ -152,7 +137,11 @@ namespace GuyueBox.UI.Views
         {
             ContextEntry en = Selected;
             if (en == null || !en.Enabled) return;
-            if (!Dialog.Confirm(this, "禁用菜单项", "确定要禁用右键菜单项「" + en.Name + "」吗？\r\n（可随时启用还原）"))
+            if (!Dialog.ConfirmDanger(this, "禁用右键菜单项",
+                "禁用右键菜单项「" + en.Name + "」，它不再出现在右键菜单里。",
+                "可撤销：随时回到本页重新启用，注册表键只是标记而非删除。",
+                "只影响右键菜单的显示；对应程序本身不受影响。",
+                "禁用", false))
                 return;
             Apply(en, false);
         }
@@ -180,20 +169,5 @@ namespace GuyueBox.UI.Views
                     else { Dialog.Error(this, enable ? "启用失败" : "禁用失败", "操作失败：\r\n" + error); SetSubtitle("操作失败", Theme.Danger); }
                 });
             });
-        }
-
-        private void Post(ThreadStart action)
-        {
-            try
-            {
-                if (IsHandleCreated && !IsDisposed)
-                {
-                    BeginInvoke((MethodInvoker)delegate { action(); });
-                }
-            }
-            catch
-            {
-            }
-        }
-    }
+        }    }
 }

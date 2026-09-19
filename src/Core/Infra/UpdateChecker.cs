@@ -70,10 +70,14 @@ namespace GuyueBox.Core
         /// </summary>
         public const string DefaultUpdateUrl = "https://raw.githubusercontent.com/Gu-yue-fy/guyue-toolbox/main/update.json";
 
-        /// <summary>项目主页（「关于与更新」页跳转用）。发布前把 your-name 替换为实际 GitHub 用户名。</summary>
+        /// <summary>项目主页（「关于与更新」页跳转用）。</summary>
         public const string ProjectUrl = "https://github.com/Gu-yue-fy/guyue-toolbox";
 
-        /// <summary>更新源是否已配置为真实地址（仍是 your-name 占位符时返回 false，检查/跳转会给出明确提示而非 404）。</summary>
+        /// <summary>
+        /// 更新源是否已配置为真实地址。
+        /// 当前地址已指向实际仓库，恒为 true；保留占位符检测是为了将来换仓库时
+        /// 若忘了改地址，页面给出"更新源未配置"的明确提示，而不是去请求 404。
+        /// </summary>
         public static bool Configured
         {
             get { return DefaultUpdateUrl.IndexOf("your-name", StringComparison.OrdinalIgnoreCase) < 0; }

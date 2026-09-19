@@ -54,7 +54,7 @@ namespace GuyueBox.UI
         protected override void OnVisibleChanged(EventArgs e)
         {
             base.OnVisibleChanged(e);
-            // 页面首次显示时，内容控件此前可能从未参与布局，需要强制重排一次
+            // 页面首次显示时，内容控件可能还没参与过布局，需要强制重排一次
             if (Visible) Relayout(true);
         }
 
@@ -155,17 +155,11 @@ namespace GuyueBox.UI
 
         public void ScrollByWheel(int delta)
         {
-            // 一格滚轮 ≈ 120px（标准 Win32 滚轮增量），与系统行为一致；
-            // 旧版减半（60px/格）会让人觉得"滚不动/滚得慢"
+            // 一格滚轮 ≈ 120px：与标准 Win32 滚轮增量一致，符合用户对滚轮速度的预期
             int step = Math.Abs(delta);
             if (step < 60) step = 60;
             if (delta > 0) SetOffset(_targetOffset - step, true);
             else SetOffset(_targetOffset + step, true);
-        }
-
-        public void ScrollToTop()
-        {
-            SetOffset(0);
         }
 
         // ---------------- 平滑滚动：滚轮目标值插值，消除逐行跳动的生硬感 ----------------
@@ -401,9 +395,10 @@ namespace GuyueBox.UI
             Gfx.EnableSmoothing(g);
             int x = ClientSize.Width - BarWidth - BarInset;
 
+            // 默认 18% 白、悬停 32% 白；拖拽/悬停仍以主题色强调
             Color thumbColor = _dragging
                 ? Theme.Accent
-                : (_hoverBar ? Theme.Accent : Gfx.Alpha(Theme.BorderStrong, 210));
+                : (_hoverBar ? Theme.ScrollThumbHover : Theme.ScrollThumb);
 
             Gfx.FillRound(g, new Rectangle(x, _thumbTop, BarWidth, _thumbSize),
                 BarWidth / 2, thumbColor);

@@ -125,8 +125,7 @@ namespace GuyueBox.UI.Views
             _optRow.Resize += delegate
             {
                 _recursive.SetBounds(0, 6, _recursive.Width, 22);
-                _progress.SetBounds(Math.Max(360, _optRow.Width - _progress.Width - 4), 6,
-                    _progress.Width, 22);
+                LayoutRightLabel(_progress, _optRow.Width, 0, 6, 22);
             };
         }
 
@@ -319,8 +318,11 @@ namespace GuyueBox.UI.Views
             }
             if (paths.Count == 0) return;
 
-            if (!Dialog.Confirm(this, "删除到回收站",
-                "确定要将选中的 " + paths.Count + " 个重复文件移入回收站吗？\r\n\r\n此操作可恢复（回收站中可找回）。建议每组至少保留一份。"))
+            if (!Dialog.ConfirmDanger(this, "删除到回收站",
+                "把选中的 " + paths.Count + " 个重复文件移入回收站。",
+                "可撤销：文件在回收站中可随时还原（清空回收站后不可恢复）。",
+                "建议每组至少保留一份副本；磁盘空间要等清空回收站后才真正释放。",
+                "移入回收站", false))
                 return;
 
             long reclaimed = 0;

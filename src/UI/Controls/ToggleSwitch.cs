@@ -26,7 +26,37 @@ namespace GuyueBox.UI
             BackColor = Color.Transparent;
             Size = new Size(40, 22);
             Cursor = Cursors.Hand;
+            A11y.MakeFocusable(this, AccessibleRole.CheckButton);
         }
+
+        /// <summary>Enter 立即切换；空格在抬起时切换（与系统按钮一致）。</summary>
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Enter && !_readOnly)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                Checked = !Checked;
+                return;
+            }
+            if (e.KeyCode == Keys.Space) { e.Handled = true; e.SuppressKeyPress = true; return; }
+            base.OnKeyDown(e);
+        }
+
+        protected override void OnKeyUp(KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Space && !_readOnly)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                Checked = !Checked;
+                return;
+            }
+            base.OnKeyUp(e);
+        }
+
+        protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+        protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
 
         public bool Checked
         {
@@ -50,24 +80,31 @@ namespace GuyueBox.UI
             Invalidate();
         }
 
-        private float _target; // 滑块动画目标（0/1）——字段化，修复"闭包只捕获首次 target"
+        private float _target;    // 滑块动画目标（0/1）。必须是字段：匿名回调若按闭包捕获，只会读到首次的值
+        private float _animFrom;  // 本次动画起点位置
+        private int _animBegin;   // 本次动画起始 TickCount
 
-        /// <summary>滑块滑动动画：约 100ms，ease-out。</summary>
+        /// <summary>滑块滑动动画：240ms 弹簧曲线（先过冲后回落），比固定步长的 ease-out 更有质感。</summary>
         private void StartAnim()
         {
             _target = _checked ? 1f : 0f;
+            _animFrom = _animPos;
+            _animBegin = Environment.TickCount;
             if (_anim == null)
             {
                 _anim = new Timer();
                 _anim.Interval = 16;
                 _anim.Tick += delegate
                 {
-                    float delta = _target - _animPos;
-                    _animPos += delta * 0.35f;
-                    if (Math.Abs(delta) < 0.02f)
+                    float t = (Environment.TickCount - _animBegin) / (float)Theme.MotionActiveMs;
+                    if (t >= 1f)
                     {
                         _animPos = _target;
                         _anim.Stop();
+                    }
+                    else
+                    {
+                        _animPos = _animFrom + (_target - _animFrom) * Theme.Spring(t);
                     }
                     Invalidate();
                 };
@@ -165,10 +202,15 @@ namespace GuyueBox.UI
             int knob = h - 6;
             // 滑块位置按动画插值：开=右端，关=左端
             float pos = _anim != null && _anim.Enabled ? _animPos : (_checked ? 1f : 0f);
+            // 弹簧过冲上限：允许轻微冲出轨道以保留弹性手感，但不越界过多
+            if (pos < 0f) pos = 0f;
+            if (pos > 1.05f) pos = 1.05f;
             int knobX = track.X + 3 + (int)Math.Round((track.Width - knob - 6) * pos);
             int knobY = track.Y + 3;
             Gfx.FillRound(g, new Rectangle(knobX, knobY, knob, knob), knob / 2,
-                _checked ? Color.White : Gfx.Alpha(Theme.TextSecondary, 210));
+                _checked ? Color.White : Theme.KnobOff);
+
+            if (Focused) A11y.DrawFocusRing(g, track, h / 2);
         }
     }
 }

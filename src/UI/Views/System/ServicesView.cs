@@ -61,7 +61,7 @@ namespace GuyueBox.UI.Views
             _summary.IconKind = "services";
             _summary.CaptionColor = Theme.Warning;
 
-            AddAction("刷新", "refresh", ButtonVariant.Secondary, delegate { Load(true); }, 92);
+            AddAction("刷新", "refresh", ButtonVariant.Secondary, delegate { Load(); }, 92);
             _sortButton = AddAction("排序：名称", "sort", ButtonVariant.Secondary, OnSortClick, 120);
             _optimizeButton = AddAction("一键提速", "bolt", ButtonVariant.Primary, OnOptimizeClick, 110);
             _restoreButton = AddAction("恢复预设", "undo", ButtonVariant.Ghost, OnRestoreClick, 110);
@@ -113,6 +113,7 @@ namespace GuyueBox.UI.Views
             _search.ForeColor = Theme.TextPrimary;
             _search.Font = Theme.FontBody;
             _search.SetBounds(30, 0, 200, 32);
+            Native.SetCue(_search, "搜索服务…");
             _search.TextChanged += delegate { ApplyFilter(); };
             _searchWrap.Controls.Add(_search);
 
@@ -127,8 +128,7 @@ namespace GuyueBox.UI.Views
             _toolbar.Resize += delegate
             {
                 _searchWrap.SetBounds(0, 1, 240, 32);
-                _countLabel.SetBounds(Math.Max(420, _toolbar.Width - _countLabel.Width - 4), 6,
-                    _countLabel.Width, 24);
+                LayoutRightLabel(_countLabel, _toolbar.Width, 248, 6, 24);
             };
         }
 
@@ -166,12 +166,12 @@ namespace GuyueBox.UI.Views
 
         public override void OnActivated()
         {
-            if (!_loaded) Load(false);
+            if (!_loaded) Load();
         }
 
         // --------------------------------------------------------------
 
-        private void Load(bool force)
+        private void Load()
         {
             if (_busy) return;
             _busy = true;
@@ -280,19 +280,14 @@ namespace GuyueBox.UI.Views
             _grid.ClearSelection();
 
             _countLabel.Text = "显示 " + shown.Count + " / " + _all.Count + " 项";
-            _countLabel.SetBounds(Math.Max(420, _toolbar.Width - _countLabel.Width - 4), 6,
-                _countLabel.Width, 24);
+            LayoutRightLabel(_countLabel, _toolbar.Width, 248, 6, 24);
             _countLabel.Invalidate();
             UpdateActions();
         }
 
         private ServiceInfo Selected
         {
-            get
-            {
-                if (_grid.SelectedRows.Count == 0) return null;
-                return _grid.SelectedRows[0].Tag as ServiceInfo;
-            }
+            get { return SelectedFrom<ServiceInfo>(_grid); }
         }
 
         private void UpdateActions()
@@ -347,9 +342,11 @@ namespace GuyueBox.UI.Views
                 return;
             }
 
-            if (!Dialog.Confirm(this, "一键提速",
-                "以下服务将被调整启动方式（需管理员权限）：\r\n\r\n" + sb +
-                "\r\n点击确定后将自动备份当前状态，可随时通过「恢复预设」回滚。"))
+            if (!Dialog.ConfirmDanger(this, "一键提速预设",
+                "调整下列服务的启动方式（需管理员权限）：\r\n" + sb,
+                "可撤销：执行前会自动备份当前启动类型，可随时点「恢复预设」还原。",
+                "禁用系统服务可能影响依赖它的功能，建议逐项确认后再执行。",
+                "应用预设", false))
                 return;
 
             EnsureElevated();
@@ -398,7 +395,7 @@ namespace GuyueBox.UI.Views
                     _busy = false;
                     if (backupPath != null) _lastBackup = backupPath;
                     UpdateActions();
-                    Load(true);
+                    Load();
                     SetSubtitle("已优化 " + ok + " 个服务" +
                         (fail > 0 ? "，" + fail + " 个失败。" : "。") +
                         (backupPath != null ? "（已备份，可一键恢复）" : ""),
@@ -419,8 +416,11 @@ namespace GuyueBox.UI.Views
                 Dialog.Info(this, "无备份", "尚未执行过提速预设，或备份文件已不存在。");
                 return;
             }
-            if (!Dialog.Confirm(this, "恢复预设",
-                "确定要将提速预设修改过的服务恢复到原始启动类型吗？"))
+            if (!Dialog.ConfirmDanger(this, "恢复预设前状态",
+                "把提速预设改过的服务恢复到执行前的启动类型。",
+                "可撤销：恢复后仍可再次应用预设。",
+                "只影响预设改过的那些服务；期间你手动改动的服务也会被一并恢复。",
+                "恢复", false))
                 return;
 
             EnsureElevated();
@@ -451,7 +451,7 @@ namespace GuyueBox.UI.Views
                 Post(delegate
                 {
                     _busy = false;
-                    Load(true);
+                    Load();
                     SetSubtitle("已恢复 " + ok + " 个服务" + (fail > 0 ? "，" + fail + " 个失败。" : "。"),
                         fail > 0 ? Theme.Warning : Theme.Success);
                 });
@@ -499,23 +499,42 @@ namespace GuyueBox.UI.Views
             return d;
         }
 
+        /// <summary>
+        /// 扫描最近一次的服务备份文件。
+        /// 虽然是单个小目录，但目录枚举 + 排序仍放到后台，不占用 UI 线程；
+        /// 完成后刷新动作按钮（「恢复预设」的可用状态依赖 _lastBackup）。
+        /// </summary>
         private void DiscoverBackup()
         {
-            try
+            ThreadPool.QueueUserWorkItem(delegate
             {
-                string dir = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "GuyueBox", "backups");
-                if (!Directory.Exists(dir)) { _lastBackup = null; return; }
-                string[] files = Directory.GetFiles(dir, "services_*.txt");
-                if (files.Length == 0) { _lastBackup = null; return; }
-                Array.Sort(files);
-                _lastBackup = files[files.Length - 1];
-            }
-            catch
-            {
-                _lastBackup = null;
-            }
+                string found = null;
+                try
+                {
+                    string dir = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "GuyueBox", "backups");
+                    if (Directory.Exists(dir))
+                    {
+                        string[] files = Directory.GetFiles(dir, "services_*.txt");
+                        if (files.Length > 0)
+                        {
+                            Array.Sort(files);
+                            found = files[files.Length - 1];
+                        }
+                    }
+                }
+                catch
+                {
+                    found = null;
+                }
+
+                Post(delegate
+                {
+                    _lastBackup = found;
+                    UpdateActions();
+                });
+            });
         }
 
         private void EnsureElevated()
@@ -552,7 +571,7 @@ namespace GuyueBox.UI.Views
                 Post(delegate
                 {
                     _busy = false;
-                    if (ok) { SetSubtitle("已启动：" + s.Name, Theme.Success); Load(true); }
+                    if (ok) { SetSubtitle("已启动：" + s.Name, Theme.Success); Load(); }
                     else { Dialog.Error(this, "启动失败", "无法启动 " + s.Name + "：\r\n" + error); SetSubtitle("启动失败：" + error, Theme.Danger); }
                 });
             });
@@ -562,7 +581,11 @@ namespace GuyueBox.UI.Views
         {
             ServiceInfo s = Selected;
             if (s == null) return;
-            if (!Dialog.Confirm(this, "停止服务", "确定要停止服务「" + s.DisplayName + "」吗？\r\n部分系统服务停止后相关功能将不可用。"))
+            if (!Dialog.ConfirmDanger(this, "停止服务",
+                "立即停止服务「" + s.DisplayName + "」。",
+                "可撤销：可随时重新启动该服务。",
+                "停止后依赖它的功能会立即不可用；系统关键服务可能导致界面异常，请确认后再操作。",
+                "停止", false))
                 return;
             EnsureElevated();
             if (!Native.IsElevated()) return;
@@ -577,7 +600,7 @@ namespace GuyueBox.UI.Views
                 Post(delegate
                 {
                     _busy = false;
-                    if (ok) { SetSubtitle("已停止：" + s.Name, Theme.Success); Load(true); }
+                    if (ok) { SetSubtitle("已停止：" + s.Name, Theme.Success); Load(); }
                     else { Dialog.Error(this, "停止失败", "无法停止 " + s.Name + "：\r\n" + error); SetSubtitle("停止失败：" + error, Theme.Danger); }
                 });
             });
@@ -587,8 +610,11 @@ namespace GuyueBox.UI.Views
         {
             ServiceInfo s = Selected;
             if (s == null) return;
-            if (!Dialog.Confirm(this, "禁用服务",
-                "确定要禁用「" + s.DisplayName + "」吗？\r\n\r\n禁用后该服务不会随系统启动，可能影响相关功能。如需恢复可再次将其设为「自动」。"))
+            if (!Dialog.ConfirmDanger(this, "禁用服务",
+                "把服务「" + s.DisplayName + "」的启动类型改为「禁用」。",
+                "可撤销：之后可随时改回「自动」或「手动」；服务文件与其数据不会被删除。",
+                "禁用后该服务不随系统启动，依赖它的功能可能不可用。",
+                "禁用", false))
                 return;
             EnsureElevated();
             if (!Native.IsElevated()) return;
@@ -603,7 +629,7 @@ namespace GuyueBox.UI.Views
                 Post(delegate
                 {
                     _busy = false;
-                    if (ok) { SetSubtitle("已禁用：" + s.Name, Theme.Success); Load(true); }
+                    if (ok) { SetSubtitle("已禁用：" + s.Name, Theme.Success); Load(); }
                     else { Dialog.Error(this, "禁用失败", "无法禁用 " + s.Name + "：\r\n" + error); SetSubtitle("禁用失败：" + error, Theme.Danger); }
                 });
             });
@@ -626,7 +652,7 @@ namespace GuyueBox.UI.Views
                 Post(delegate
                 {
                     _busy = false;
-                    if (ok) { SetSubtitle("已设为自动：" + s.Name, Theme.Success); Load(true); }
+                    if (ok) { SetSubtitle("已设为自动：" + s.Name, Theme.Success); Load(); }
                     else { Dialog.Error(this, "设置失败", "无法将 " + s.Name + " 设为自动：\r\n" + error); SetSubtitle("设置失败：" + error, Theme.Danger); }
                 });
             });
@@ -639,20 +665,5 @@ namespace GuyueBox.UI.Views
             Gfx.StrokeRound(g, new Rectangle(0, 0, _searchWrap.Width - 1, _searchWrap.Height - 1), 6,
                 Theme.BorderStrong, 1f);
             IconPainter.Draw(g, "search", new Rectangle(9, 8, 16, 16), Theme.TextMuted);
-        }
-
-        private void Post(ThreadStart action)
-        {
-            try
-            {
-                if (IsHandleCreated && !IsDisposed)
-                {
-                    BeginInvoke((MethodInvoker)delegate { action(); });
-                }
-            }
-            catch
-            {
-            }
-        }
-    }
+        }    }
 }

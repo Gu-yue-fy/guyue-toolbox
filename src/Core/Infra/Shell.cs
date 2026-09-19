@@ -22,10 +22,24 @@ namespace GuyueBox.Core
                 get { return ExitCode == 0; }
             }
 
+            // All 会被反复访问（日志、对话框、成败判定），此处做记忆化：
+            // 用「字段引用」而非值比较来判失效——字符串字段被重新赋值时引用必然变化，
+            // 因此缓存自动失效，无需调用方配合清理，O(1) 判定且不产生额外分配。
+            private string _allCache;
+            private string _allOut;
+            private string _allErr;
+
             public string All
             {
                 get
                 {
+                    if (_allCache != null &&
+                        object.ReferenceEquals(_allOut, Output) &&
+                        object.ReferenceEquals(_allErr, Error))
+                    {
+                        return _allCache;
+                    }
+
                     StringBuilder sb = new StringBuilder();
                     if (!string.IsNullOrEmpty(Output)) sb.Append(Output.Trim());
                     if (!string.IsNullOrEmpty(Error))
@@ -33,7 +47,11 @@ namespace GuyueBox.Core
                         if (sb.Length > 0) sb.Append(Environment.NewLine);
                         sb.Append(Error.Trim());
                     }
-                    return sb.ToString();
+
+                    _allOut = Output;
+                    _allErr = Error;
+                    _allCache = sb.ToString();
+                    return _allCache;
                 }
             }
         }
@@ -46,19 +64,26 @@ namespace GuyueBox.Core
         /// 注意：不能依赖 Console.OutputEncoding——GUI 进程没有控制台时它返回 UTF-8，
         /// 会让按 GBK 输出的工具中文乱码。
         /// </summary>
+        /// <summary>控制台编码解析结果缓存：进程生命周期内不变，无需每次解码都查询代码页。</summary>
+        private static Encoding _consoleEncoding;
+
         private static Encoding GetConsoleEncoding()
         {
+            Encoding cached = _consoleEncoding;
+            if (cached != null) return cached;
+
             try
             {
-                Encoding e = Encoding.GetEncoding(0); // 0 = 系统 ANSI 代码页
+                cached = Encoding.GetEncoding(0); // 0 = 系统 ANSI 代码页
                 // 系统开了「Beta: 使用 UTF-8 提供全球语言支持」时 ANSI 即 UTF-8，无需特殊处理
-                return e;
             }
             catch
             {
-                try { return Encoding.Default; }
-                catch { return Encoding.UTF8; }
+                try { cached = Encoding.Default; }
+                catch { cached = Encoding.UTF8; }
             }
+            _consoleEncoding = cached;
+            return cached;
         }
 
         /// <summary>
@@ -178,6 +203,20 @@ namespace GuyueBox.Core
                     tOut.Join(5000);
                     tErr.Join(5000);
 
+                    // 极端情况：子进程派生的孙进程仍持有管道写端 → 读取线程永远等不到 EOF。
+                    // 此时 Join 已超时，但内存流仍在被并发写入（MemoryStream 非线程安全），
+                    // 直接 ToArray 会读到截断/错乱的内容。主动关闭管道逼读取线程退出后再取缓冲。
+                    if (tOut.IsAlive)
+                    {
+                        try { p.StandardOutput.BaseStream.Dispose(); } catch { }
+                        tOut.Join(1000);
+                    }
+                    if (tErr.IsAlive)
+                    {
+                        try { p.StandardError.BaseStream.Dispose(); } catch { }
+                        tErr.Join(1000);
+                    }
+
                     byte[] outBytes = outMs.ToArray();
                     byte[] errBytes = errMs.ToArray();
                     if (encoding != null)
@@ -222,14 +261,14 @@ namespace GuyueBox.Core
         /// <summary>用资源管理器打开路径。</summary>
         public static void OpenSelect(string path)
         {
-            try { Process.Start("explorer.exe", "/select,\"" + path + "\""); } catch { }
+            try { using (Process.Start("explorer.exe", "/select,\"" + path + "\"")) { } } catch { }
         }
 
         public static void OpenPath(string path)
         {
             try
             {
-                Process.Start("explorer.exe", "\"" + path + "\"");
+                using (Process.Start("explorer.exe", "\"" + path + "\"")) { }
             }
             catch
             {
@@ -246,7 +285,7 @@ namespace GuyueBox.Core
                 psi.Arguments = arguments == null ? "" : arguments;
                 psi.UseShellExecute = true;
                 psi.Verb = "runas";
-                Process.Start(psi);
+                using (Process.Start(psi)) { }
                 return true;
             }
             catch

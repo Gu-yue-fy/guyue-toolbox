@@ -422,7 +422,8 @@ namespace GuyueBox.Core
                 object def = RegHelper.GetValue(RegistryHive.LocalMachine,
                     @"SYSTEM\CurrentControlSet\Control\Power\PowerSettings\" + DiskSubgroup +
                     "\\" + Settings[i][0] + @"\DefaultPowerSchemeValues\" + scheme, "ACSettingIndex");
-                string val = def == null ? Settings[i][1] : Convert.ToInt32(def).ToString();
+                int di;
+                string val = (def != null && int.TryParse(def.ToString(), out di)) ? di.ToString() : Settings[i][1];
                 Shell.Run("powercfg.exe",
                     "-setacvalueindex scheme_current " + DiskSubgroup + " " + Settings[i][0] + " " + val, 30000);
                 Shell.Run("powercfg.exe",

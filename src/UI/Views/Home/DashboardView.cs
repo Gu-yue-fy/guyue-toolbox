@@ -10,10 +10,10 @@ namespace GuyueBox.UI.Views
 {
     public sealed class DashboardView : ViewBase
     {
-        private readonly StatCard _cpuCard = new StatCard();
-        private readonly StatCard _memCard = new StatCard();
-        private readonly StatCard _diskCard = new StatCard();
-        private readonly StatCard _uptimeCard = new StatCard();
+        /// <summary>数据带（对齐设计概览页的主视觉承载面）：CPU / 内存 / 系统盘 / 运行时间 四格连成一体。</summary>
+        private readonly MetricBand _band = new MetricBand();
+        private readonly SectionTitle _secDevice = new SectionTitle();
+        private readonly SectionTitle _secMatrix = new SectionTitle();
 
         private readonly HealthCard _health = new HealthCard();
         private readonly NoticeBar _notice = new NoticeBar();
@@ -26,6 +26,14 @@ namespace GuyueBox.UI.Views
         private AccentButton _checkButton;
         private AccentButton _refreshButton;
 
+        private static MetricBand.Cell NewCell(string label, Color tone)
+        {
+            MetricBand.Cell c = new MetricBand.Cell();
+            c.Label = label;
+            c.Tone = tone;
+            return c;
+        }
+
         private SystemSnapshot _snapshot;
         private bool _loading;
         private bool _deepLoaded;
@@ -37,14 +45,21 @@ namespace GuyueBox.UI.Views
                 ? "第一次用？点右上「一键体检」查看系统健康；每项优化都能在「优化中心」随时还原"
                 : "系统健康总览：体检得分 · 资源占用 · 优化建议")
         {
-            _cpuCard.IconKind = "cpu";
-            _cpuCard.AccentColor = Theme.Accent;
-            _memCard.IconKind = "memory";
-            _memCard.AccentColor = Theme.Purple;
-            _diskCard.IconKind = "disk";
-            _diskCard.AccentColor = Theme.Success;
-            _uptimeCard.IconKind = "clock";
-            _uptimeCard.AccentColor = Theme.Warning;
+            _band.SetCells(new MetricBand.Cell[]
+            {
+                NewCell("CPU", Theme.Accent),
+                NewCell("内存", Theme.Purple),
+                NewCell("系统盘", Theme.Success),
+                NewCell("运行时间", Theme.Warning)
+            });
+
+            _secDevice.TitleText = "设备与系统信息";
+            _secDevice.HintText = "计算机名 · 操作系统 · 处理器 · 显卡";
+            _secDevice.Tone = Theme.Accent;
+
+            _secMatrix.TitleText = "功能矩阵";
+            _secMatrix.HintText = "常用功能一屏直达";
+            _secMatrix.Tone = Theme.Cyan;
 
             _sysInfo.Caption = "系统信息";
             _sysInfo.IconKind = "info";
@@ -120,37 +135,93 @@ namespace GuyueBox.UI.Views
             _checkButton2.Click += OnHealthCheck;
             _health.Controls.Add(_checkButton2);
 
+            // 体检闭环的另一半：查出问题后直接给出"能自动处理的那部分"的入口。
+            // 之前体检只给分数并把用户推到别的页，等于"发现问题和解决问题之间断了"。
+            _fixButton = new AccentButton();
+            _fixButton.Text = "一键修复";
+            _fixButton.IconKind = "check";
+            _fixButton.Variant = ButtonVariant.Warning;
+            _fixButton.Size = new Size(150, 44);
+            _fixButton.Visible = false;
+            _fixButton.Click += OnFixAll;
+            _health.Controls.Add(_fixButton);
+
             _health.Resize += delegate
             {
+                _fixButton.Location = new Point(
+                    Math.Max(10, _health.Width - 180), (_health.Height - 44) / 2 - 26);
                 _checkButton2.Location = new Point(
-                    Math.Max(10, _health.Width - 180), (_health.Height - 44) / 2);
+                    Math.Max(10, _health.Width - 180), (_health.Height - 44) / 2 + 26);
             };
         }
 
         private AccentButton _checkButton2;
+        private AccentButton _fixButton;
 
         private void BuildLayout()
         {
-            // 首页聚焦「概览」：健康体检 → 实时统计 → 系统信息 → 磁盘。
-            // 高精度计时器已独立成功能页（优化 → 高精度计时器，支持自动寻优）。
+            // 版式对齐设计 OverviewPage：体检卡 → 数据带 → 提示 → 设备信息 → 功能矩阵。
             AddFull(_health, 156, 14);
 
-            FlowLayoutPanel statsRow = MakeRowFixed(128, 14);
-            statsRow.Controls.Add(_cpuCard);
-            statsRow.Controls.Add(_memCard);
-            statsRow.Controls.Add(_diskCard);
-            statsRow.Controls.Add(_uptimeCard);
-            AddRow(statsRow);
+            // 数据带：四格连成一体（格间 1px 竖线），概览页唯一的强主视觉
+            AddFull(_band, MetricBand.CellMinHeight, 14);
 
             AddFull(_notice, 34, 14);
 
+            AddFull(_secDevice, 44, 8);
             _infoRow = MakeRow(320, 14);
             _infoRow.Controls.Add(_sysInfo);
             _infoRow.Controls.Add(_diskInfo);
             AddRow(_infoRow);
 
+            // 功能矩阵：3 列磁贴（设计 OverviewModuleTile），常用入口一屏直达
+            AddFull(_secMatrix, 44, 8);
+            // "optimize|分组名" = 进入优化中心并选中该分类：
+            // 10 个「按分组过滤」的独立页面已收敛为页内分类 chip，避免侧栏出现 11 个同类入口
+            AddRow(BuildTileRow("optimize", "全部优化项", "逐项开关，随时还原", "tune", Theme.Accent,
+                "optimize|性能加速", "性能加速", "CPU · 内存 · 文件系统", "bolt", Theme.Cyan,
+                "optimize|游戏优化", "游戏优化", "降延迟 · 全屏独占", "play", Theme.Purple));
+            AddRow(BuildTileRow("optimize|网络优化", "网络优化", "TCP · DNS · 网卡", "globe", Theme.Success,
+                "optimize|系统服务", "系统服务", "后台服务启停", "services", Theme.Warning,
+                "cleanup", "清理与磁盘", "垃圾 · 空间 · 磁盘健康", "clean", Theme.Danger));
+
             Body.Resize += delegate { SyncInfoHeights(); };
             SyncInfoHeights();
+        }
+
+        /// <summary>一行 3 个功能磁贴。</summary>
+        private FlowLayoutPanel BuildTileRow(string k1, string t1, string d1, string i1, Color a1,
+            string k2, string t2, string d2, string i2, Color a2,
+            string k3, string t3, string d3, string i3, Color a3)
+        {
+            FlowLayoutPanel row = MakeRowFixed(92, 10);
+            row.Controls.Add(MakeTile(k1, t1, d1, i1, a1));
+            row.Controls.Add(MakeTile(k2, t2, d2, i2, a2));
+            row.Controls.Add(MakeTile(k3, t3, d3, i3, a3));
+            return row;
+        }
+
+        private static FeatureTile MakeTile(string key, string title, string desc, string icon, Color accent)
+        {
+            FeatureTile t = new FeatureTile(title, desc, icon, accent);
+            t.Height = 92;
+            t.Margin = new Padding(0, 0, 10, 0);
+            t.Click += delegate
+            {
+                MainForm mf = MainForm.Current;
+                if (mf == null) return;
+
+                // 支持 "页面键|分组名"：进入页面后由页面消费该分组（如优化中心选中某分类）
+                string page = key;
+                int bar = key.IndexOf('|');
+                if (bar > 0)
+                {
+                    page = key.Substring(0, bar);
+                    OptimizeView.PendingGroup = key.Substring(bar + 1);
+                }
+                mf.NavigateTo(page);
+            };
+            return t;
         }
 
         private FlowLayoutPanel _infoRow;
@@ -170,10 +241,12 @@ namespace GuyueBox.UI.Views
                 int diskHeight = Math.Max(200, _diskInfo.PreferredHeight);
                 int cardH = Math.Max(infoHeight, diskHeight);
 
-                int usedTop = Body.Padding.Top + 156 + 14 + 128 + 14 + 34 + 14; // health/stats/notice 及间距
+                // 上方固定内容：体检卡 156+14 / 数据带 166+14 / 提示条 34+14 / 区块标题 44+8
+                int usedTop = Body.Padding.Top + 156 + 14 + MetricBand.CellMinHeight + 14 + 34 + 14 + 44 + 8;
                 int remain = ViewportHeight - usedTop - Body.Padding.Bottom;
-                int rowH = Math.Max(320, remain);
-                if (rowH > 900) rowH = 900; // 超大屏限制卡片扩张幅度
+                // 上限 420：下方还有「功能矩阵」区块，信息行不能再无限吸收余量，
+                // 否则矩阵会被推到折叠线以下（设计的设备信息区本就是紧凑三列）。
+                int rowH = Math.Max(300, Math.Min(remain, 420));
                 if (_infoRow.Height != rowH) _infoRow.Height = rowH;
 
                 cardH = Math.Max(cardH, rowH);
@@ -242,24 +315,29 @@ namespace GuyueBox.UI.Views
         {
             if (!Visible) return;
 
-            double load = _cpuMeter.Sample();
-            if (load >= 0)
+            // 本方法由 3 秒 Timer.Tick 在 UI 线程直接调用：一旦采样抛异常（性能计数器
+            // 不可用 / WMI 访问被拒等）会直接崩进程，因此整体包一层保护。
+            try
             {
-                _cpuCard.MetricText = load.ToString("0") + " %";
-                _cpuCard.Percent = load;
-                _cpuCard.AccentColor = Gfx.LoadColor(load);
-                _cpuCard.Invalidate();
-            }
+                double load = _cpuMeter.Sample();
+                if (load >= 0)
+                {
+                    _band.UpdateCell(0, load.ToString("0") + " %", load, LoadStatus(load), null);
+                    _band.SetTone(0, Gfx.LoadColor(load));
+                }
 
-            MemoryInfo m = SysInfo.GetMemory();
-            if (m.TotalBytes > 0)
+                MemoryInfo m = SysInfo.GetMemory();
+                if (m.TotalBytes > 0)
+                {
+                    _band.UpdateCell(1, m.UsedPercent.ToString("0") + " %", m.UsedPercent,
+                        LoadStatus(m.UsedPercent),
+                        "已用 " + SysInfo.FormatSize(m.UsedBytes) + " / 共 " + SysInfo.FormatSize(m.TotalBytes));
+                    _band.SetTone(1, Gfx.LoadColor(m.UsedPercent));
+                }
+            }
+            catch
             {
-                _memCard.MetricText = m.UsedPercent.ToString("0") + " %";
-                _memCard.Percent = m.UsedPercent;
-                _memCard.AccentColor = Gfx.LoadColor(m.UsedPercent);
-                _memCard.FooterText = "已用 " + SysInfo.FormatSize(m.UsedBytes) +
-                    " / 共 " + SysInfo.FormatSize(m.TotalBytes);
-                _memCard.Invalidate();
+                // 采样失败时不更新卡片，静默跳过（下一次 Tick 再试）。
             }
         }
 
@@ -276,21 +354,17 @@ namespace GuyueBox.UI.Views
             }
             _notice.Visible = true;
 
-            _cpuCard.CaptionText = "CPU 使用率";
-            _cpuCard.MetricText = s.CpuLoadPercent >= 0 ? s.CpuLoadPercent.ToString("0") + " %" : "--";
-            _cpuCard.Percent = s.CpuLoadPercent;
-            _cpuCard.AccentColor = s.CpuLoadPercent >= 0 ? Gfx.LoadColor(s.CpuLoadPercent) : Theme.Accent;
-            _cpuCard.FooterText = s.CpuCores + " 核 / " + s.CpuThreads + " 线程";
-            _cpuCard.Invalidate();
+            _band.UpdateCell(0,
+                s.CpuLoadPercent >= 0 ? s.CpuLoadPercent.ToString("0") + " %" : "--",
+                s.CpuLoadPercent, LoadStatus(s.CpuLoadPercent),
+                s.CpuCores + " 核 / " + s.CpuThreads + " 线程");
+            _band.SetTone(0, s.CpuLoadPercent >= 0 ? Gfx.LoadColor(s.CpuLoadPercent) : Theme.Accent);
 
             MemoryInfo m = s.Memory;
-            _memCard.CaptionText = "内存占用";
-            _memCard.MetricText = m.UsedPercent.ToString("0") + " %";
-            _memCard.Percent = m.UsedPercent;
-            _memCard.AccentColor = Gfx.LoadColor(m.UsedPercent);
-            _memCard.FooterText = "已用 " + SysInfo.FormatSize(m.UsedBytes) +
-                " / 共 " + SysInfo.FormatSize(m.TotalBytes);
-            _memCard.Invalidate();
+            _band.UpdateCell(1, m.UsedPercent.ToString("0") + " %", m.UsedPercent,
+                LoadStatus(m.UsedPercent),
+                "已用 " + SysInfo.FormatSize(m.UsedBytes) + " / 共 " + SysInfo.FormatSize(m.TotalBytes));
+            _band.SetTone(1, Gfx.LoadColor(m.UsedPercent));
 
             DiskInfo systemDisk = null;
             for (int i = 0; i < s.Disks.Count; i++)
@@ -305,28 +379,19 @@ namespace GuyueBox.UI.Views
 
             if (systemDisk != null)
             {
-                _diskCard.CaptionText = "系统盘 " + systemDisk.Name.TrimEnd('\\');
-                _diskCard.MetricText = systemDisk.UsedPercent.ToString("0") + " %";
-                _diskCard.Percent = systemDisk.UsedPercent;
-                _diskCard.AccentColor = Gfx.LoadColor(systemDisk.UsedPercent);
-                _diskCard.FooterText = "可用 " + SysInfo.FormatSize(systemDisk.FreeBytes) +
-                    " / 共 " + SysInfo.FormatSize(systemDisk.TotalBytes);
+                _band.UpdateCell(2, systemDisk.UsedPercent.ToString("0") + " %", systemDisk.UsedPercent,
+                    LoadStatus(systemDisk.UsedPercent) + " · " + systemDisk.Name.TrimEnd('\\'),
+                    "可用 " + SysInfo.FormatSize(systemDisk.FreeBytes) +
+                    " / 共 " + SysInfo.FormatSize(systemDisk.TotalBytes));
+                _band.SetTone(2, Gfx.LoadColor(systemDisk.UsedPercent));
             }
             else
             {
-                _diskCard.CaptionText = "系统盘";
-                _diskCard.MetricText = "--";
-                _diskCard.Percent = -1;
-                _diskCard.FooterText = "未检测到本地磁盘";
+                _band.UpdateCell(2, "--", -1, "未检测到本地磁盘", "");
             }
-            _diskCard.Invalidate();
 
-            _uptimeCard.CaptionText = "系统运行时间";
-            _uptimeCard.MetricText = FormatUptime(s.Uptime);
-            _uptimeCard.Percent = -1;
-            _uptimeCard.FooterText = s.BootTime == DateTime.MinValue
-                ? "" : "上次启动：" + s.BootTime.ToString("MM-dd HH:mm");
-            _uptimeCard.Invalidate();
+            _band.UpdateCell(3, FormatUptime(s.Uptime), -1, "自上次启动",
+                s.BootTime == DateTime.MinValue ? "" : "上次启动 " + s.BootTime.ToString("MM-dd HH:mm"));
 
             _sysInfo.Clear();
             // 核心 6 行：概览首屏一屏放下（主板/BIOS/系统版本等完整信息在「导出报告」里）
@@ -353,6 +418,15 @@ namespace GuyueBox.UI.Views
             _diskInfo.Invalidate();
 
             SyncInfoHeights();
+        }
+
+        /// <summary>把占用率转成一句状态文案（设计数据带的状态行）。</summary>
+        private static string LoadStatus(double percent)
+        {
+            if (percent < 0) return "";
+            if (percent >= 90) return "占用很高";
+            if (percent >= 70) return "占用偏高";
+            return "占用正常";
         }
 
         private static string FormatUptime(TimeSpan t)
@@ -393,11 +467,8 @@ namespace GuyueBox.UI.Views
                     {
                         List<JunkCategory> cats = JunkScanner.BuildDefaultCategories();
                         JunkScanner scanner = new JunkScanner();
-                        for (int i = 0; i < cats.Count; i++)
-                        {
-                            scanner.Scan(cats[i]);
-                            junk += cats[i].Size;
-                        }
+                        scanner.ScanAll(cats, null); // 与清理页共用并行扫描
+                        for (int i = 0; i < cats.Count; i++) junk += cats[i].Size;
                     }
                     catch
                     {
@@ -486,6 +557,13 @@ namespace GuyueBox.UI.Views
                         _health.SetScoreAnimated(finalScore);
                         ApplyScore(finalScore, issueCount);
 
+                        // 有建议项时才出现「一键修复」：没有问题时不留一个点不动的按钮
+                        if (_fixButton != null)
+                        {
+                            _fixButton.Visible = issueCount > 0;
+                            _fixButton.Text = issueCount > 0 ? "一键修复" : "";
+                        }
+
                         string title = "体检完成，得分 " + finalScore + " 分";
                         SetSubtitle(issueCount > 0
                             ? title + "，共 " + issueCount + " 项建议——清理与启动项可到「清理与磁盘」处理。"
@@ -519,6 +597,73 @@ namespace GuyueBox.UI.Views
                         Dialog.Error(this, "体检失败", ex.Message);
                     });
                 }
+            });
+        }
+
+        /// <summary>
+        /// 一键修复：只处理"本工具确实能自动修"的那部分（清缓存、刷新解析、关闭异常代理、
+        /// 应用推荐优化项），复用 RepairCenter 的检测与修复动作，不另造一套。
+        /// 修不了的一律明说去哪手动处理——不给假承诺。
+        /// </summary>
+        internal void OnFixAll(object sender, EventArgs e)
+        {
+            if (_checking) return;
+            if (!Dialog.ConfirmDanger(this, "处理可自动修复项",
+                "扫描并修复本工具能自动处理的问题：清理缓存、刷新 DNS、关闭异常代理、应用推荐优化项。",
+                "可撤销：清理的是缓存（系统会按需重建）；优化项与代理改动都有备份，可逐项改回。",
+                "不会删除个人文件、不改驱动、不结束进程；需要手动处理的问题（如驱动异常）只做提示。",
+                "开始处理", false))
+                return;
+
+            _checking = true;
+            if (_checkButton2 != null) _checkButton2.Enabled = false;
+            if (_fixButton != null) _fixButton.Enabled = false;
+            SetSubtitle("正在处理可自动修复项…", Theme.Warning);
+
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                int fixedCount = 0;
+                int fixable = 0;
+                string firstError = null;
+                try
+                {
+                    bool cancelled;
+                    List<RepairItem> items = RepairCenter.Scan(null, null, out cancelled);
+                    for (int i = 0; i < items.Count; i++)
+                    {
+                        RepairItem it = items[i];
+                        if (!it.Detected || !it.Fixable) continue;
+                        fixable++;
+                        string msg = RepairCenter.Fix(it);
+                        if (it.Fixed) fixedCount++;
+                        else if (firstError == null) firstError = msg;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    firstError = ex.Message;
+                }
+
+                Post(delegate
+                {
+                    _checking = false;
+                    if (_fixButton != null) _fixButton.Enabled = true;
+                    if (_checkButton2 != null) _checkButton2.Enabled = true;
+
+                    if (fixable == 0)
+                    {
+                        SetSubtitle("没有可自动修复的问题；其余建议需手动处理（详见「修复中心」）。",
+                            Theme.TextSecondary);
+                        if (_fixButton != null) _fixButton.Visible = false;
+                        return;
+                    }
+
+                    SetSubtitle("已处理 " + fixedCount + " / " + fixable + " 项可自动修复问题"
+                        + (fixedCount < fixable ? "，其余多为文件被占用，稍后重试即可。" : "。"),
+                        fixedCount > 0 ? Theme.Success : Theme.Warning);
+                    Toast("已处理 " + fixedCount + " 项", "正在重新体检以刷新评分…", ToastKind.Success);
+                    OnHealthCheck(this, EventArgs.Empty);
+                });
             });
         }
 
@@ -596,19 +741,5 @@ namespace GuyueBox.UI.Views
                     }
                 });
             });
-        }
-
-        private void Post(ThreadStart action)
-        {
-            try
-            {
-                if (IsHandleCreated && !IsDisposed)
-                {
-                    BeginInvoke((MethodInvoker)delegate { action(); });
-                }
-            }
-            catch
-            {            }
-        }
-    }
+        }    }
 }

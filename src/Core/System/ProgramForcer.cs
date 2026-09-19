@@ -83,14 +83,16 @@ namespace GuyueBox.Core
             TryAddShortcut(p.Files, Environment.SpecialFolder.CommonPrograms, e.Name);
 
             // ④ 注册表：主卸载键 + 同名软件键 + 同发布者的同名子键
+            //    同名/同发布者软件键要求键确实存在且"确属该程序"（DisplayName 同名或 InstallLocation 指向它），
+            //    避免误删 HKCU\Software\Microsoft、HKLM\SOFTWARE\Intel 这类庞大且无关节点。
             if (!string.IsNullOrEmpty(e.KeyPath)) p.RegistryKeys.Add(e.KeyPath);
             foreach (string k in ScanUninstallLeftovers(e)) TryAddReg(p.RegistryKeys, k);
-            TryAddReg(p.RegistryKeys, @"HKCU\Software\" + e.Name);
-            TryAddReg(p.RegistryKeys, @"HKLM\SOFTWARE\" + e.Name);
+            TryAddRegIfOwned(p.RegistryKeys, @"HKCU\Software\" + e.Name, e);
+            TryAddRegIfOwned(p.RegistryKeys, @"HKLM\SOFTWARE\" + e.Name, e);
             if (!string.IsNullOrEmpty(e.Publisher) && e.Publisher.Length >= 3)
             {
-                TryAddReg(p.RegistryKeys, @"HKCU\Software\" + e.Publisher);
-                TryAddReg(p.RegistryKeys, @"HKLM\SOFTWARE\" + e.Publisher);
+                TryAddRegIfOwned(p.RegistryKeys, @"HKCU\Software\" + e.Publisher, e);
+                TryAddRegIfOwned(p.RegistryKeys, @"HKLM\SOFTWARE\" + e.Publisher, e);
             }
 
             return p;
@@ -112,8 +114,12 @@ namespace GuyueBox.Core
             {
                 string dir = Environment.GetFolderPath(folder);
                 if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return;
-                string[] lnks = Directory.GetFiles(dir, "*" + name + "*.lnk", SearchOption.AllDirectories);
-                for (int i = 0; i < lnks.Length && list.Count < 20; i++)
+
+                // 逐目录 try/catch 的安全遍历（实现统一在 DirWalk）：
+                // SearchOption.AllDirectories 遇到无权限子目录会整体抛异常，
+                // 导致一个快捷方式都找不到
+                List<string> lnks = DirWalk.ListFiles(dir, "*" + name + "*.lnk");
+                for (int i = 0; i < lnks.Count && list.Count < 20; i++)
                     if (!list.Contains(lnks[i])) list.Add(lnks[i]);
             }
             catch { }
@@ -177,6 +183,40 @@ namespace GuyueBox.Core
             return hits;
         }
 
+        /// <summary>同名/同发布者软件键的谨慎判定：键必须真实存在，且能确认它"属于该程序"才加入删除计划，
+        /// 避免误删 HKCU\Software\Microsoft、HKLM\SOFTWARE\Intel 这类庞大且无关节点。</summary>
+        private static void TryAddRegIfOwned(List<string> list, string hiveKeyPath, ProgramEntry e)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(hiveKeyPath) || list.Contains(hiveKeyPath)) return;
+                if (e == null || e.Name == null || e.Name.Length < 3) return;
+                RegistryHive hive;
+                string sub;
+                if (!SplitHive(hiveKeyPath, out hive, out sub)) return;
+                using (RegistryKey k = RegistryKey.OpenBaseKey(hive, RegistryView.Default).OpenSubKey(sub, false))
+                {
+                    if (k == null) return;
+                    bool owns = false;
+                    object dn = k.GetValue("DisplayName");
+                    if (dn != null && string.Equals(dn.ToString(), e.Name, StringComparison.OrdinalIgnoreCase)) owns = true;
+                    if (!owns && e.HasLocation && !string.IsNullOrEmpty(e.InstallLocation))
+                    {
+                        object il = k.GetValue("InstallLocation");
+                        if (il != null)
+                        {
+                            string ilStr = il.ToString().TrimEnd('\\');
+                            string loc = e.InstallLocation.TrimEnd('\\');
+                            if (ilStr.Equals(loc, StringComparison.OrdinalIgnoreCase) ||
+                                ilStr.IndexOf(e.Name, StringComparison.OrdinalIgnoreCase) >= 0) owns = true;
+                        }
+                    }
+                    if (owns) list.Add(hiveKeyPath);
+                }
+            }
+            catch { }
+        }
+
         // ----------------------------------------------------------------
         // 执行阶段
         // ----------------------------------------------------------------
@@ -184,6 +224,7 @@ namespace GuyueBox.Core
         /// <summary>执行计划：结束进程 → 删目录/快捷方式 → 删注册表键。返回动作报告；失败项记入 errors。</summary>
         public static string Execute(Plan plan, List<string> errors)
         {
+            if (plan == null || plan.Entry == null) return "计划为空，未执行任何操作。";
             int killed = 0, folders = 0, files = 0, regs = 0;
 
             // ① 结束进程

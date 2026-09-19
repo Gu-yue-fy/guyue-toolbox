@@ -30,7 +30,7 @@ namespace GuyueBox.UI
         public DiskList()
         {
             BackColor = Theme.CardBg;
-            Radius = 12;
+            Radius = Theme.RadiusCard;
         }
 
         public void Clear()
@@ -59,7 +59,7 @@ namespace GuyueBox.UI
             if (!string.IsNullOrEmpty(IconKind))
             {
                 Rectangle box = new Rectangle(16, 13, 22, 22);
-                Gfx.FillRound(g, box, 6, Gfx.Alpha(CaptionColor, 32));
+                Gfx.FillRound(g, box, Theme.RadiusChip, Gfx.Alpha(CaptionColor, 32));
                 IconPainter.Draw(g, IconKind, new Rectangle(20, 17, 14, 14), CaptionColor);
                 x = 46;
             }

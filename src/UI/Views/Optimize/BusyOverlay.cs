@@ -30,7 +30,8 @@ namespace GuyueBox.UI.Views
             _spin.Tick += delegate
             {
                 bool alphaChanged = Math.Abs(_alphaTarget - _alpha) >= 0.02f;
-                _angle = (_angle + 4.2f) % 360f;
+                // 每帧步进 = 360° / 周期：统一为 Theme.Motion.LoopSpin（1000ms 一圈）
+                _angle = (_angle + 360f * 16f / Theme.Motion.LoopSpin) % 360f;
                 _breath += 0.09f;
                 _alpha += (_alphaTarget - _alpha) * 0.3f;
                 if (Math.Abs(_alphaTarget - _alpha) < 0.02f) _alpha = _alphaTarget;

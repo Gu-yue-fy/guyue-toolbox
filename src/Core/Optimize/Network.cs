@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Net.NetworkInformation;
 using Microsoft.Win32;
 
 namespace GuyueBox.Core
@@ -31,9 +32,30 @@ namespace GuyueBox.Core
         public bool Risky { get { return false; } }
         public bool Recommended { get { return false; } }
 
+        /// <summary>真正参与联网的接口 GUID 集合（排除环回与隧道），用于过滤 Tcpip 接口子键。</summary>
+        private static HashSet<string> AllowedInterfaceGuids()
+        {
+            HashSet<string> set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                NetworkInterface[] nics = NetworkInterface.GetAllNetworkInterfaces();
+                for (int i = 0; i < nics.Length; i++)
+                {
+                    if (nics[i].NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+                    if (nics[i].NetworkInterfaceType == NetworkInterfaceType.Tunnel) continue;
+                    set.Add(nics[i].Id);
+                }
+            }
+            catch
+            {
+            }
+            return set;
+        }
+
         private static List<string> InterfacePaths()
         {
             List<string> list = new List<string>();
+            HashSet<string> allowed = AllowedInterfaceGuids();
             try
             {
                 using (RegistryKey root = Registry.LocalMachine.OpenSubKey(InterfacesPath, false))
@@ -42,6 +64,8 @@ namespace GuyueBox.Core
                     string[] subs = root.GetSubKeyNames();
                     for (int i = 0; i < subs.Length; i++)
                     {
+                        // 只处理真实网卡接口，跳过环回/隧道接口（写三键无意义）
+                        if (allowed.Count > 0 && !allowed.Contains(subs[i])) continue;
                         list.Add(InterfacesPath + "\\" + subs[i]);
                     }
                 }
@@ -112,231 +136,18 @@ namespace GuyueBox.Core
     /// 为选定的游戏 exe 写入 QoS 策略（HKLM\...\QoS），出站包打 DSCP 46 标记，
     /// 支持按包优先级调度的路由器/运营商会优先转发游戏流量。
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     public sealed class DscpTweak : ITweak
     {
         private const string QosKey = @"SOFTWARE\Policies\Microsoft\Windows\QoS";
+        private const string MarkerKey = @"Software\GuyueBox\DscpMarker";
+        private const string MarkerName = "AppPath";
+
+        /// <summary>读出本项上次 Apply 时记录的游戏 exe 完整路径（用于精确定位还原，避免误删他人规则）。</summary>
+        private static string StoredExe()
+        {
+            object v = RegHelper.GetValue(RegistryHive.CurrentUser, MarkerKey, MarkerName);
+            return v == null ? "" : Convert.ToString(v);
+        }
 
         public string Id { get { return "dscp_game_marker"; } }
         public string Group { get { return TweakLibrary.GGame; } }
@@ -364,13 +175,20 @@ namespace GuyueBox.Core
             "Set-ItemProperty -Path $k -Name 'DSCP Value' -Value '46' -Type String\r\n" +
             "Set-ItemProperty -Path $k -Name 'Throttle Rate' -Value '-1' -Type String\r\n" +
             "Set-ItemProperty -Path $k -Name \"Don't use NLA\" -Value '1' -Type String\r\n" +
-            "Set-ItemProperty -Path 'HKCU:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers' -Name $d.FileName -Value '~ DISABLEDXMAXIMIZEDWINDOWEDMODE HIGHDPIAWARE' -Type String\r\n";
+            "Set-ItemProperty -Path 'HKCU:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers' -Name $d.FileName -Value '~ DISABLEDXMAXIMIZEDWINDOWEDMODE HIGHDPIAWARE' -Type String\r\n" +
+            "New-Item -Path 'HKCU:\\Software\\GuyueBox\\DscpMarker' -Force | Out-Null\r\n" +
+            "Set-ItemProperty -Path 'HKCU:\\Software\\GuyueBox\\DscpMarker' -Name 'AppPath' -Value $d.FileName -Type String\r\n";
 
         private const string RevertScript =
-            "$base = 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\QoS'\r\n" +
-            "if (Test-Path $base) { Get-ChildItem $base | ForEach-Object { $v = (Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue).'DSCP Value'; if ($v -eq '46') { Remove-Item $_.PSPath -Force } } }\r\n" +
-            "$lay = 'HKCU:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers'\r\n" +
-            "if (Test-Path $lay) { $p = Get-ItemProperty $lay; $p.PSObject.Properties | Where-Object { $_.Value -like '*DISABLEDXMAXIMIZEDWINDOWEDMODE*' } | ForEach-Object { Remove-ItemProperty -Path $lay -Name $_.Name -ErrorAction SilentlyContinue } }\r\n";
+            "$store = 'HKCU:\\Software\\GuyueBox\\DscpMarker'\r\n" +
+            "$p = (Get-ItemProperty $store -Name 'AppPath' -ErrorAction SilentlyContinue).AppPath\r\n" +
+            "if ($p) {\r\n" +
+            "  $n = Split-Path $p -Leaf\r\n" +
+            "  Remove-Item \"HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\QoS\\$n\" -Force -ErrorAction SilentlyContinue\r\n" +
+            "  $lay = 'HKCU:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers'\r\n" +
+            "  if (Test-Path $lay) { Remove-ItemProperty -Path $lay -Name $p -ErrorAction SilentlyContinue }\r\n" +
+            "  Remove-ItemProperty $store -Name 'AppPath' -ErrorAction SilentlyContinue\r\n" +
+            "}\r\n";
 
         private static bool RunScript(string script)
         {
@@ -391,21 +209,21 @@ namespace GuyueBox.Core
 
         public bool IsApplied()
         {
+            string path = StoredExe();
+            if (string.IsNullOrEmpty(path)) return false;
+            string n = System.IO.Path.GetFileName(path);
             try
             {
                 using (RegistryKey baseKey = Registry.LocalMachine.OpenSubKey(QosKey))
                 {
                     if (baseKey == null) return false;
-                    foreach (string sub in baseKey.GetSubKeyNames())
+                    using (RegistryKey k = baseKey.OpenSubKey(n))
                     {
-                        using (RegistryKey k = baseKey.OpenSubKey(sub))
-                        {
-                            if (k == null) continue;
-                            object v = k.GetValue("DSCP Value");
-                            object nla = k.GetValue("Don't use NLA");
-                            if (v != null && v.ToString() == "46" &&
-                                nla != null && nla.ToString() == "1") return true;
-                        }
+                        if (k == null) return false;
+                        object v = k.GetValue("DSCP Value");
+                        object nla = k.GetValue("Don't use NLA");
+                        return v != null && v.ToString() == "46" &&
+                            nla != null && nla.ToString() == "1";
                     }
                 }
             }
@@ -521,23 +339,25 @@ namespace GuyueBox.Core
             if (paths.Count == 0) return false;
 
             RegHelper.BeginBackup(Id);
+            bool ok = true;
             for (int i = 0; i < paths.Count; i++)
             {
                 try
                 {
                     for (int n = 0; n < StrKeys.Length; n++)
                     {
-                        RegHelper.SetValue(RegistryHive.LocalMachine, paths[i], StrKeys[n], "0",
-                            RegistryValueKind.String, Id);
+                        if (!RegHelper.SetValue(RegistryHive.LocalMachine, paths[i], StrKeys[n], "0",
+                            RegistryValueKind.String, Id)) ok = false;
                     }
-                    RegHelper.SetValue(RegistryHive.LocalMachine, paths[i], "PnPCapabilities", 24,
-                        RegistryValueKind.DWord, Id);
+                    if (!RegHelper.SetValue(RegistryHive.LocalMachine, paths[i], "PnPCapabilities", 24,
+                        RegistryValueKind.DWord, Id)) ok = false;
                 }
                 catch
                 {
+                    ok = false;
                 }
             }
-            return true;
+            return ok;
         }
 
         public bool Revert()
@@ -746,7 +566,7 @@ namespace GuyueBox.Core
 
         public bool IsApplied()
         {
-            string text = RunNetsh(_show);
+            string text = Shell.Netsh(_show).All;
             if (string.IsNullOrEmpty(text)) return false;
             for (int i = 0; i < _patterns.Length; i++)
             {
@@ -756,68 +576,8 @@ namespace GuyueBox.Core
             return true;
         }
 
-        /// <summary>
-        /// 运行 netsh 并自适应解码输出：新系统 (Win11 24H2+) 重定向输出为 UTF-8，
-        /// 旧系统为系统 ANSI（中文 GBK/936）。按原始字节先试严格 UTF-8，失败回退 GBK。
-        /// </summary>
-        private static string RunNetsh(string arguments)
-        {
-            try
-            {
-                using (System.Diagnostics.Process p = new System.Diagnostics.Process())
-                {
-                    System.Diagnostics.ProcessStartInfo psi = new System.Diagnostics.ProcessStartInfo();
-                    psi.FileName = "netsh.exe";
-                    psi.Arguments = arguments;
-                    psi.UseShellExecute = false;
-                    psi.CreateNoWindow = true;
-                    psi.RedirectStandardOutput = true;
-                    psi.RedirectStandardError = true;
-                    p.StartInfo = psi;
-                    p.Start();
-
-                    byte[] stdout = ReadAll(p.StandardOutput.BaseStream);
-                    byte[] stderr = ReadAll(p.StandardError.BaseStream);
-                    p.WaitForExit(30000);
-
-                    return DecodeAuto(stdout) + "\r\n" + DecodeAuto(stderr);
-                }
-            }
-            catch
-            {
-                return "";
-            }
-        }
-
-        private static byte[] ReadAll(System.IO.Stream stream)
-        {
-            using (System.IO.MemoryStream ms = new System.IO.MemoryStream())
-            {
-                byte[] buf = new byte[8192];
-                while (true)
-                {
-                    int n = stream.Read(buf, 0, buf.Length);
-                    if (n <= 0) break;
-                    ms.Write(buf, 0, n);
-                }
-                return ms.ToArray();
-            }
-        }
-
-        private static string DecodeAuto(byte[] data)
-        {
-            if (data == null || data.Length == 0) return "";
-            try
-            {
-                // 严格 UTF-8：出现非法序列即抛异常，走 GBK 回退
-                return new System.Text.UTF8Encoding(false, true).GetString(data);
-            }
-            catch
-            {
-                try { return System.Text.Encoding.GetEncoding(936).GetString(data); }
-                catch { return System.Text.Encoding.GetEncoding(0).GetString(data); } // OEM 代码页（netsh 输出实际编码）
-            }
-        }
+        // netsh 输出读取与解码统一交由 Shell.Netsh（双线程抄读 + 自动识别 GBK/UTF-8），
+        // 不再在此重复实现，既消除「先读 stdout 到底再读 stderr」的双管道死锁风险，也避免解码逻辑分叉。
 
         public bool Apply()
         {
@@ -899,9 +659,10 @@ namespace GuyueBox.Core
 
         public bool Apply()
         {
-            Ps("Disable-NetAdapterBinding -Name '*' -ComponentID " + ComponentIds +
-                " -ErrorAction SilentlyContinue");
-            return true; // 部分机器无对应绑定也算完成
+            // 返回命令是否成功退出（SilentlyContinue 下"无对应绑定"也视为成功）
+            return Shell.Run("powershell.exe",
+                "-NoProfile -Command \"Disable-NetAdapterBinding -Name '*' -ComponentID " + ComponentIds +
+                " -ErrorAction SilentlyContinue\"", 60000).Ok;
         }
 
         public bool Revert()

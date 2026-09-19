@@ -182,6 +182,7 @@ namespace GuyueBox.UI.Views
             _searchBox.BorderStyle = BorderStyle.FixedSingle;
             _searchBox.Font = Theme.FontBody;
             _searchBox.Size = new Size(220, 28);
+            Native.SetCue(_searchBox, "搜索进程 / PID…");
             _searchBox.TextChanged += delegate { Render(); };
             searchRow.Controls.Add(_searchBox);
             string[] chipTexts = new string[] { "全部", "高 CPU", "高内存" };
@@ -313,7 +314,7 @@ namespace GuyueBox.UI.Views
                 if (_hotFilter == 1 && p.CpuPercent < 10) continue;
                 if (_hotFilter == 2 && p.WorkingSet < 1024L * 1024 * 500) continue;
                 if (q.Length > 0 &&
-                    p.Name.IndexOf(q, StringComparison.OrdinalIgnoreCase) < 0 &&
+                    (p.Name ?? "").IndexOf(q, StringComparison.OrdinalIgnoreCase) < 0 &&
                     !p.Pid.ToString().Contains(q))
                 {
                     continue;
@@ -574,8 +575,11 @@ namespace GuyueBox.UI.Views
         {
             ProcInfo p = SelectedSingle();
             if (p == null) { Dialog.Info(this, "未选择", "请先选择一个进程。"); return; }
-            if (!Dialog.Confirm(this, "结束进程树",
-                "将结束「" + p.Name + "」及其全部子进程（PID " + p.Pid + "）。\r\n未保存的数据会丢失，是否继续？")) return;
+            if (!Dialog.ConfirmDanger(this, "结束进程树",
+                "强制结束「" + p.Name + "」及其全部子进程（PID " + p.Pid + "）。",
+                "不可撤销：进程被杀后无法恢复，只能重新启动该程序。",
+                "未保存的文档与编辑内容会丢失；系统进程被结束可能导致界面异常。",
+                "结束", true)) return;
 
             ThreadPool.QueueUserWorkItem(delegate
             {
@@ -662,7 +666,9 @@ namespace GuyueBox.UI.Views
 
             int half = cores / 2;
             long mask = 0;
-            for (int i = 0; i < cores; i++)
+            // 亲和掩码仅当前处理器组的 64 位：核心序号须 < 64，否则 1L << i 移位越界置错位。
+            // 超过 64 核的机器超出首组的部分无法用 ProcessorAffinity 表达，此处钳制到 63。
+            for (int i = 0; i < cores && i < 64; i++)
             {
                 bool inRange = firstHalf ? i < half : i >= cores - half;
                 if (inRange) mask |= 1L << i;
@@ -689,7 +695,9 @@ namespace GuyueBox.UI.Views
             ProcInfo p = SelectedSingle();
             if (p == null) { Dialog.Info(this, "未选择", "请先选择一个进程。"); return; }
 
-            long mask = Environment.ProcessorCount >= 64 ? long.MaxValue : (1L << Environment.ProcessorCount) - 1;
+            // 全核掩码：用 -1L（64 位全置位）而非 long.MaxValue（仅 0-62），否则漏掉第 63 核。
+            // 程序为 anycpu，64 位系统上 IntPtr 为 8 字节，可容纳完整 64 位亲和掩码。
+            long mask = Environment.ProcessorCount >= 64 ? -1L : (1L << Environment.ProcessorCount) - 1;
             try
             {
                 using (Process process = Process.GetProcessById(p.Pid))
@@ -727,8 +735,11 @@ namespace GuyueBox.UI.Views
             }
             if (targets.Count > 8) names += "· …等共 " + targets.Count + " 个进程\r\n";
 
-            if (!Dialog.Confirm(this, "结束进程",
-                "确定要结束以下进程吗？\r\n\r\n" + names + "\r\n未保存的数据将会丢失。"))
+            if (!Dialog.ConfirmDanger(this, "结束进程",
+                "强制结束选中的 " + targets.Count + " 个进程。",
+                "不可撤销：进程被杀后无法恢复，只能重新启动对应程序。",
+                "未保存的数据会丢失；本工具自身的进程会被自动跳过。",
+                "结束", true))
                 return;
 
             int ok = 0;
@@ -752,20 +763,5 @@ namespace GuyueBox.UI.Views
             }
 
             Refresh(true);
-        }
-
-        private void Post(ThreadStart action)
-        {
-            try
-            {
-                if (IsHandleCreated && !IsDisposed)
-                {
-                    BeginInvoke((MethodInvoker)delegate { action(); });
-                }
-            }
-            catch
-            {
-            }
-        }
-    }
+        }    }
 }
