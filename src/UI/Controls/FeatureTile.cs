@@ -1,4 +1,9 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：功能磁贴：图标 + 名称 + 一句话描述，悬停提亮
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Drawing;
 using System.Windows.Forms;
 using GuyueBox.Core;
@@ -20,7 +25,6 @@ namespace GuyueBox.UI
         // 悬停 / 按下的过渡进度（0..1）：对齐设计磁贴的 hover 抬升 1px（进 120ms / 出 160ms）
         private float _hoverP;
         private float _pressP;
-        private Timer _anim;
         private int _animStart;
         private float _hoverFrom;
         private float _pressFrom;
@@ -107,16 +111,10 @@ namespace GuyueBox.UI
         /// <summary>启动悬停 / 按下的过渡插值（同 AccentButton 的做法）。</summary>
         private void StartAnim()
         {
-            if (_anim == null)
-            {
-                _anim = new Timer { Interval = 16 };
-                _anim.Tick += OnAnimTick;
-            }
-
             // 与 AccentButton 保持一致：禁用状态的磁贴不做悬停过渡（否则会给"不可点击"错误的反馈）
             if (!Enabled || !AppSettings.Animations)
             {
-                _anim.Stop();
+                AnimationClock.Instance.Unsubscribe(OnAnimTick);
                 _hoverP = _hover ? 1f : 0f;
                 _pressP = _pressed ? 1f : 0f;
                 Invalidate();
@@ -127,15 +125,15 @@ namespace GuyueBox.UI
             _pressFrom = _pressP;
             _hoverDur = _hover ? Theme.Motion.HoverIn : Theme.Motion.HoverOut;
             _animStart = Environment.TickCount;
-            _anim.Start();
+            AnimationClock.Instance.Subscribe(OnAnimTick);
             Invalidate();
         }
 
-        private void OnAnimTick(object sender, EventArgs e)
+        private void OnAnimTick()
         {
             try
             {
-                if (IsDisposed || Disposing) { _anim.Stop(); return; }
+                if (IsDisposed || Disposing) { AnimationClock.Instance.Unsubscribe(OnAnimTick); return; }
 
                 int elapsed = Environment.TickCount - _animStart;
                 float th = Theme.Ease.CubicOut((float)elapsed / _hoverDur);
@@ -150,13 +148,13 @@ namespace GuyueBox.UI
                 {
                     _hoverP = _hover ? 1f : 0f;
                     _pressP = _pressed ? 1f : 0f;
-                    _anim.Stop();
+                    AnimationClock.Instance.Unsubscribe(OnAnimTick);
                     Invalidate();
                 }
             }
             catch
             {
-                try { _anim.Stop(); } catch { }
+                try { AnimationClock.Instance.Unsubscribe(OnAnimTick); } catch { }
             }
         }
 
@@ -165,12 +163,7 @@ namespace GuyueBox.UI
             if (disposing)
             {
                 // 悬停动画进行中销毁磁贴时停表并释放定时器，避免定时器继续触发已释放控件
-                if (_anim != null)
-                {
-                    _anim.Stop();
-                    _anim.Dispose();
-                    _anim = null;
-                }
+                AnimationClock.Instance.Unsubscribe(OnAnimTick);
             }
             base.Dispose(disposing);
         }
@@ -180,12 +173,9 @@ namespace GuyueBox.UI
             Graphics g = e.Graphics;
             Gfx.EnableSmoothing(g);
 
-            if (Parent != null)
             {
-                using (SolidBrush b = new SolidBrush(Parent.BackColor))
-                {
-                    g.FillRectangle(b, ClientRectangle);
-                }
+                // 铺底走父级真实背景（父级带光晕/渐变时不再盖成平色方块）
+                GuyueBox.UI.Backdrop.Paint(g, this);
             }
 
             // 悬停抬升：整块（卡片 + 图标 + 文字）一起上移 1px —— 设计磁贴同一手法，
@@ -214,9 +204,9 @@ namespace GuyueBox.UI
                 iconBg.X + (IconBlock - 22) / 2, iconBg.Y + (IconBlock - 22) / 2, 22, 22), Color.White);
 
             // 标题 + 描述
-            using (SolidBrush b = new SolidBrush(Theme.TextPrimary))
+            SolidBrush titleBrush = GdiCache.Brush(Theme.TextPrimary);
             {
-                g.DrawString(Text, Theme.FontBodyBold, b,
+                g.DrawString(Text, Theme.FontBodyBold, titleBrush,
                     new Rectangle(iconBg.Right + 10, 14 - lift, Math.Max(40, Width - iconBg.Right - 20), 20),
                     GdiCache.Ellipsis);
             }
@@ -228,7 +218,8 @@ namespace GuyueBox.UI
                     GdiCache.Ellipsis);
             }
 
-            if (Focused) A11y.DrawFocusRing(g, r, Theme.RadiusCard);
+            // 仅键盘导航时提示焦点（鼠标点击后不留框）
+            if (Focused && ShowFocusCues) A11y.DrawFocusRing(g, r, Theme.RadiusCard);
         }
     }
 }

@@ -1,4 +1,9 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：自绘表格：列排序、勾选列与平滑滚动
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -35,7 +40,7 @@ namespace GuyueBox.UI
 
             if (isChecked)
             {
-                using (Pen pen = new Pen(Color.White, 1.9f))
+                Pen pen = GdiCache.Pen(Theme.TextOnAccent, 1.9f);
                 {
                     pen.StartCap = LineCap.Round;
                     pen.EndCap = LineCap.Round;
@@ -50,7 +55,6 @@ namespace GuyueBox.UI
             }
         }
     }
-
     public class DarkCheckColumn : DataGridViewCheckBoxColumn
     {
         public DarkCheckColumn()
@@ -60,7 +64,6 @@ namespace GuyueBox.UI
             SortMode = DataGridViewColumnSortMode.NotSortable;
         }
     }
-
     /// <summary>应用深色主题的 DataGridView。</summary>
     public class DarkGrid : DataGridView
     {
@@ -70,8 +73,12 @@ namespace GuyueBox.UI
         /// </summary>
         public bool CheckOnRowClick { get; set; }
 
-        /// <summary>点击列头按该列排序（非绑定表格的手动排序，行 Tag 与勾选值随行保留）。</summary>
-        public bool ColumnClickSort { get; set; }
+        /// <summary>
+        /// 点击列头按该列排序（非绑定表格的手动排序，行 Tag 与勾选值随行保留）。
+        /// 默认开启：列表型表格统一"点列头即排序"，不再有的页有、有的页没有；
+        /// 数据本身有语义顺序、排序会破坏结构的表格（分组列表 / 跑分结果 / 调参清单）显式关掉。
+        /// </summary>
+        public bool ColumnClickSort { get; set; } = true;
 
         private int _sortCol = -1;
         private bool _sortAsc = true;
@@ -161,6 +168,10 @@ namespace GuyueBox.UI
             ColumnHeaderMouseClick += delegate(object sender, DataGridViewCellMouseEventArgs e)
             {
                 if (!ColumnClickSort) return;
+                // 虚拟模式的行是按需从页面的数据列表生成的，Rows 集合里没有可重排的行对象——
+                // 直接排序会清空整张表（表现为"点一下列头全部项都没了"）。
+                // 虚拟页要排序应自行排序背后的数据列表后重新绑定（RowCount + Invalidate）。
+                if (VirtualMode) return;
                 int col = e.ColumnIndex;
                 if (col < 0) return;
                 if (col == _sortCol) _sortAsc = !_sortAsc;
@@ -199,6 +210,22 @@ namespace GuyueBox.UI
             };
 
             ApplyTheme();
+
+            // 平滑滚动收敛逻辑收口到 SmoothScroll（读/写首行索引，遇控件释放时回调抛异常会自动停止）
+            _smooth = new SmoothScroll(
+                () => FirstDisplayedScrollingRowIndex,
+                v =>
+                {
+                    try
+                    {
+                        FirstDisplayedScrollingRowIndex = (int)Math.Round(v);
+                        UpdateThumb();   // 自绘滚动条的滑块跟随缓动帧
+                        Invalidate();
+                    }
+                    catch { }
+                },
+                Theme.Motion.GridLerp,
+                Theme.Motion.ScrollSnap);
         }
 
         /// <summary>当前悬停行索引（-1 = 无）。CellFormatting 据此着色。</summary>
@@ -228,14 +255,14 @@ namespace GuyueBox.UI
                 DefaultCellStyle.BackColor = Theme.GridRow;
                 DefaultCellStyle.ForeColor = Theme.TextPrimary;
                 DefaultCellStyle.SelectionBackColor = Theme.GridSelection;
-                DefaultCellStyle.SelectionForeColor = Color.White;
+                DefaultCellStyle.SelectionForeColor = Theme.TextOnAccent;
                 DefaultCellStyle.Padding = new Padding(8, 0, 0, 0);
                 DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleLeft;
 
                 AlternatingRowsDefaultCellStyle.BackColor = Theme.GridRowAlt;
                 AlternatingRowsDefaultCellStyle.ForeColor = Theme.TextPrimary;
                 AlternatingRowsDefaultCellStyle.SelectionBackColor = Theme.GridSelection;
-                AlternatingRowsDefaultCellStyle.SelectionForeColor = Color.White;
+                AlternatingRowsDefaultCellStyle.SelectionForeColor = Theme.TextOnAccent;
 
                 Invalidate();
             }
@@ -308,8 +335,7 @@ namespace GuyueBox.UI
         private int _dragStartY;
         private int _dragStartRow;
 
-        private System.Windows.Forms.Timer _smoothTimer;
-        private int _scrollTarget;
+        private readonly SmoothScroll _smooth;
 
         /// <summary>true 时表格高度固定，由内置滚动条负责浏览所有行。</summary>
         public bool UseOwnScrollbar
@@ -376,68 +402,31 @@ namespace GuyueBox.UI
             try { first = FirstDisplayedScrollingRowIndex; }
             catch { return false; }
 
+            // 基准取缓动目标：连续滚轮要按目标累积，否则动画途中每格都从当前行重算、越滚越慢
+            int baseRow = _smooth.IsRunning ? (int)Math.Round(_smooth.Target) : first;
+
             int maxFirst = Math.Max(0, TotalRows - VisibleRows);
             int step = Math.Abs(delta) / 40;
             if (step < 1) step = 1;
             if (step > 6) step = 6;
 
-            int target = delta > 0 ? first - step : first + step;
+            int target = delta > 0 ? baseRow - step : baseRow + step;
             target = Math.Max(0, Math.Min(maxFirst, target));
 
-            bool moved = target != first;
+            bool moved = target != baseRow;
             if (moved)
             {
-                _scrollTarget = target;
-                EnsureSmoothTimer();
+                // 与页面 ScrollHost 同一种手感：指数插值缓动。
+                //（页面平滑、表格瞬跳的话，滚过两者交界处会"一边流畅一边跳"）
+                _smooth.AnimateTo(target);
             }
             return moved;
         }
 
-        /// <summary>首次滚动时创建并启动缓动定时器（帧率 12ms）。</summary>
-        private void EnsureSmoothTimer()
-        {
-            if (_smoothTimer == null)
-            {
-                _smoothTimer = new System.Windows.Forms.Timer();
-                _smoothTimer.Interval = 12;
-                _smoothTimer.Tick += delegate { SmoothStep(); };
-            }
-            if (!_smoothTimer.Enabled) _smoothTimer.Start();
-        }
-
-        /// <summary>每帧把首行缓动逼近目标（指数插值），消除逐行跳动的生硬感。</summary>
-        private void SmoothStep()
-        {
-            int actual;
-            try { actual = FirstDisplayedScrollingRowIndex; }
-            catch { StopSmoothTimer(); return; }
-
-            double diff = _scrollTarget - actual;
-            if (Math.Abs(diff) < 0.06)
-            {
-                int snap = (int)Math.Round((double)_scrollTarget);
-                if (actual != snap) { try { FirstDisplayedScrollingRowIndex = snap; } catch { } }
-                StopSmoothTimer();
-                return;
-            }
-            int next = (int)Math.Round(actual + diff * 0.35);
-            if (next != actual) { try { FirstDisplayedScrollingRowIndex = next; } catch { } }
-        }
-
-        private void StopSmoothTimer()
-        {
-            if (_smoothTimer != null) _smoothTimer.Stop();
-        }
-
-        /// <summary>释放缓动定时器（切页销毁控件树后，Win32 定时器若仍触发会访问已释放的行集合）。</summary>
+        /// <summary>释放缓动（切页销毁控件树后，残留的缓动回调若仍触发会访问已释放的行集合）。</summary>
         protected override void Dispose(bool disposing)
         {
-            if (disposing && _smoothTimer != null)
-            {
-                _smoothTimer.Stop();
-                _smoothTimer.Dispose();
-                _smoothTimer = null;
-            }
+            _smooth.Stop();
             base.Dispose(disposing);
         }
 
@@ -452,16 +441,11 @@ namespace GuyueBox.UI
             int trackH = ClientSize.Height - BarInset * 2;
             if (total <= view || view <= 0 || trackH <= 0) return;
 
-            _thumbSize = Math.Max(MinThumb, (int)((double)trackH * view / total));
-            if (_thumbSize > trackH) _thumbSize = trackH;
-
-            int maxFirst = total - view;
+            // 缩略几何收口到 ScrollGeom（与 ScrollHost 共用）；读取首行在控件释放时容错为 0
             int first = 0;
             try { first = FirstDisplayedScrollingRowIndex; }
             catch { }
-
-            int travel = trackH - _thumbSize;
-            _thumbTop = BarInset + (maxFirst <= 0 ? 0 : travel * first / maxFirst);
+            ScrollGeom.Compute(total, view, BarInset, MinThumb, first, out _thumbSize, out _thumbTop);
         }
 
         private bool HitBar(int x)

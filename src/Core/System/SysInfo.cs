@@ -1,6 +1,6 @@
-﻿/* ============================================================
+﻿﻿/* ============================================================
  * 文件说明：系统信息采集：硬件/CPU/内存/磁盘/网络适配器，全部走 WMI 与原生 API，不依赖第三方库。
- * 项目：古月工具包（GuyueBox）
+ * 项目：古月工具箱（GuyueBox）
  * ============================================================ */
 
 using System;
@@ -9,6 +9,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Management;
 using System.Text;
+using Microsoft.Win32;
 
 namespace GuyueBox.Core
 {
@@ -29,7 +30,6 @@ namespace GuyueBox.Core
             get { return TotalBytes == 0 ? 0 : (double)UsedBytes * 100.0 / TotalBytes; }
         }
     }
-
     public sealed class DiskInfo
     {
         public string Name;
@@ -49,7 +49,34 @@ namespace GuyueBox.Core
             get { return TotalBytes <= 0 ? 0 : (double)UsedBytes * 100.0 / TotalBytes; }
         }
     }
-
+    /// <summary>系统信息页的补充硬件信息（内存条 / 显存 / 网络）。</summary>
+    public sealed class HardwareExtra
+    {
+        public int MemoryModuleCount;
+        public ulong MemoryModuleTotal;
+        public string MemorySpeed = "";      // MHz
+        public string GpuVram = "";
+        public string ActiveAdapter = "";
+        public string IPv4 = "";
+        public string Gateway = "";
+        public string Dns = "";
+    }
+    /// <summary>
+    /// 系统级性能计数（来自 psapi PERFORMANCE_INFORMATION）：
+    /// 内核分页/非分页池、系统缓存、提交量、句柄与进程/线程总数。
+    /// 这些是"内存去哪了"的关键线索，但 GetMemory() 不提供，故单独成类。
+    /// </summary>
+    public sealed class MemoryPerf
+    {
+        public ulong CommitTotal;
+        public ulong CommitLimit;
+        public ulong SystemCache;
+        public ulong KernelPaged;
+        public ulong KernelNonpaged;
+        public uint HandleCount;
+        public uint ProcessCount;
+        public uint ThreadCount;
+    }
     public sealed class SystemSnapshot
     {
         public string ComputerName = "";
@@ -115,6 +142,163 @@ namespace GuyueBox.Core
             {
             }
             return m;
+        }
+
+        /// <summary>
+        /// 补充硬件信息（系统信息页用）：内存条数量/总容量/频率、显卡显存、活动网卡与 IP/网关/DNS。
+        /// 这些都要走 WMI 或网卡 API，代价比基础字段高，故与 Capture 分开、按需调用。
+        /// </summary>
+        public static HardwareExtra GetHardwareExtra()
+        {
+            HardwareExtra e = new HardwareExtra();
+
+            // ---- 内存条 ----
+            try
+            {
+                using (ManagementObjectSearcher s = new ManagementObjectSearcher(
+                    "SELECT Capacity, Speed FROM Win32_PhysicalMemory"))
+                {
+                    foreach (ManagementObject mo in s.Get())
+                    {
+                        using (mo)
+                        {
+                            object cap = mo["Capacity"];
+                            if (cap != null)
+                            {
+                                try
+                                {
+                                    e.MemoryModuleCount++;
+                                    e.MemoryModuleTotal += Convert.ToUInt64(cap);
+                                }
+                                catch
+                                {
+                                }
+                            }
+                            object sp = mo["Speed"];
+                            if (sp != null)
+                            {
+                                try
+                                {
+                                    int mhz = Convert.ToInt32(sp);
+                                    int cur;
+                                    if (mhz > 0 && (!int.TryParse(e.MemorySpeed, out cur) || mhz > cur))
+                                        e.MemorySpeed = mhz.ToString();
+                                }
+                                catch
+                                {
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            // ---- 显卡显存 ----
+            // WMI 的 Win32_VideoController.AdapterRAM 是 UINT32：显存 > 4GB 时会被截断（4090 会报 4GB），
+            // 因此优先读显示适配器类键里的 HardwareInformation.qwMemorySize（QWORD，值正确），WMI 兜底。
+            try
+            {
+                // 与 Core/Optimize/Gpu.cs 的 GpuClass 同一条路径（显示适配器类 GUID）
+                const string GpuClassPath = @"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
+                for (int i = 0; i < 4 && e.GpuVram.Length == 0; i++)
+                {
+                    string sub = GpuClassPath + "\\000" + i;
+                    object qw = RegHelper.GetValue(RegistryHive.LocalMachine, sub, "HardwareInformation.qwMemorySize");
+                    if (qw == null) continue;
+                    ulong bytes;
+                    try { bytes = Convert.ToUInt64(qw); }
+                    catch { continue; }
+                    if (bytes == 0) continue;
+                    string name = Convert.ToString(
+                        RegHelper.GetValue(RegistryHive.LocalMachine, sub, "HardwareInformation.AdapterString"));
+                    if (string.IsNullOrEmpty(name)) name = Convert.ToString(
+                        RegHelper.GetValue(RegistryHive.LocalMachine, sub, "DriverDesc"));
+                    if (string.IsNullOrEmpty(name)) name = "显示适配器 " + i;
+                    e.GpuVram = name + " · " + FormatSize(bytes);
+                }
+            }
+            catch
+            {
+            }
+            if (e.GpuVram.Length == 0)
+            {
+                try
+                {
+                    using (ManagementObjectSearcher s = new ManagementObjectSearcher(
+                        "SELECT Name, AdapterRAM FROM Win32_VideoController"))
+                    {
+                        foreach (ManagementObject mo in s.Get())
+                        {
+                            using (mo)
+                            {
+                                string name = Convert.ToString(mo["Name"]);
+                                if (name.IndexOf("Microsoft Basic", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                                object ram = mo["AdapterRAM"];
+                                if (ram == null) continue;
+                                ulong bytes;
+                                try { bytes = Convert.ToUInt64(ram); }
+                                catch { continue; }
+                                if (bytes == 0) continue;
+                                e.GpuVram = name + " · " + FormatSize(bytes) + "（WMI 上限 4GB，可能截断）";
+                                break;
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            // ---- 活动网卡与地址 ----
+            try
+            {
+                List<AdapterInfo> nics = NetTools.ListAdapters();
+                for (int i = 0; i < nics.Count; i++)
+                {
+                    if (nics[i].Status != "已连接") continue;
+                    e.ActiveAdapter = nics[i].Name;
+                    e.IPv4 = nics[i].IPv4.Count > 0 ? string.Join(" / ", nics[i].IPv4.ToArray()) : "";
+                    e.Gateway = nics[i].Gateway.Count > 0 ? string.Join(" / ", nics[i].Gateway.ToArray()) : "";
+                    e.Dns = nics[i].Dns.Count > 0 ? string.Join(" / ", nics[i].Dns.ToArray()) : "";
+                    break;
+                }
+            }
+            catch
+            {
+            }
+
+            return e;
+        }
+
+        /// <summary>读取系统性能计数（内核池 / 缓存 / 提交量 / 句柄与进程线程数）。失败返回全零对象。</summary>
+        public static MemoryPerf GetMemoryPerf()
+        {
+            MemoryPerf p = new MemoryPerf();
+            try
+            {
+                Native.PERFORMANCE_INFORMATION pi;
+                uint cb = (uint)System.Runtime.InteropServices.Marshal.SizeOf(typeof(Native.PERFORMANCE_INFORMATION));
+                if (!Native.GetPerformanceInfo(out pi, cb)) return p;
+
+                ulong pageSize = (ulong)pi.PageSize.ToInt64();
+                if (pageSize == 0) pageSize = 4096;
+                p.CommitTotal = (ulong)pi.CommitTotal.ToInt64() * pageSize;
+                p.CommitLimit = (ulong)pi.CommitLimit.ToInt64() * pageSize;
+                p.SystemCache = (ulong)pi.SystemCache.ToInt64() * pageSize;
+                p.KernelPaged = (ulong)pi.KernelPaged.ToInt64() * pageSize;
+                p.KernelNonpaged = (ulong)pi.KernelNonpaged.ToInt64() * pageSize;
+                p.HandleCount = pi.HandleCount;
+                p.ProcessCount = pi.ProcessCount;
+                p.ThreadCount = pi.ThreadCount;
+            }
+            catch
+            {
+            }
+            return p;
         }
 
         public static List<DiskInfo> GetDisks(bool fixedOnly)

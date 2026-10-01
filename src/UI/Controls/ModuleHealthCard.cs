@@ -1,4 +1,9 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：模块健康卡：环形启用率 + 风险图例
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -52,56 +57,41 @@ namespace GuyueBox.UI
             Graphics g = e.Graphics;
             Gfx.EnableSmoothing(g);
 
-            // ---- 左：圆环（轨道 + 渐变进度弧 + 发光 + 中心计数）----
-            Rectangle ring = new Rectangle(22, (Height - RingSize) / 2, RingSize, RingSize);
+            // ---- 内容整体居中 ----
+            // 卡片是被拉伸到满行的（Tag=stretch）：内容若一律贴左缘，右侧会留一大片空白。
+            // 这里把「圆环 + 计数 + 图例」当作一个整体在卡内居中；窄卡（内容比卡还宽）退回贴左缘。
+            const int CountW = 200;
+            const int LegendW = 260;
+            const int ContentW = RingSize + 16 + CountW + 24 + LegendW;
+            bool wide = Width >= ContentW + 44;
+            int x0 = wide ? (Width - ContentW) / 2 : 20;
+
+            // 画法与内存页环形仪表共用 Gfx.DrawRingArc：带"环境光"光晕、不带末端落点，每段约 15°
+            Rectangle ring = new Rectangle(x0, (Height - RingSize) / 2, RingSize, RingSize);
             double pct = _total > 0 ? (double)_applied / _total : 0.0;
 
-            g.DrawEllipse(GdiCache.Pen(Theme.CardBgAlt, RingThick), ring);
-
-            if (pct > 0)
-            {
-                // 发光：先画一圈低 alpha 粗弧作"环境光"，再叠渐变进度弧——
-                // 静态单色环看起来像占位图，发光弧才有"仪表在工作"的观感
-                Color glow = Gfx.Alpha(Theme.Accent, 42);
-                using (Pen gp = new Pen(glow, RingThick + 6))
-                {
-                    gp.StartCap = LineCap.Round;
-                    gp.EndCap = LineCap.Round;
-                    g.DrawArc(gp, ring, -90f, (float)(pct * 360.0));
-                }
-
-                float sweep = (float)(pct * 360.0);
-                int seg = (int)Math.Ceiling(sweep / 15.0);
-                if (seg < 1) seg = 1;
-                Color to = Gfx.Shade(Theme.Accent, 1.35);
-                for (int i = 0; i < seg; i++)
-                {
-                    float a0 = -90f + sweep * i / seg;
-                    float a1 = -90f + sweep * (i + 1) / seg;
-                    Color c = seg <= 1 ? Theme.Accent : Gfx.Blend(Theme.Accent, to, (double)i / (seg - 1));
-                    using (Pen p = new Pen(c, RingThick))
-                    {
-                        p.StartCap = LineCap.Round;
-                        p.EndCap = LineCap.Round;
-                        g.DrawArc(p, ring, a0, (a1 - a0) + 0.8f);
-                    }
-                }
-            }
+            Gfx.DrawRingArc(g, ring, RingThick, pct * 360.0,
+                Theme.Accent, Gfx.Shade(Theme.Accent, 1.35), true, false, 15.0);
 
             // 环内只放百分比：58px 的环放不下两行文字，之前 79 与 /234 会挤在一起。
             Gfx.DrawTextCenter(g, (pct * 100.0).ToString("0") + "%", Theme.FontSmall, Theme.TextPrimary, ring);
 
-            // ---- 右：启用计数（大字）+ 风险图例 ----
+            // ---- 启用计数（大字）+ 风险图例 ----
             int x = ring.Right + 16;
-            int textW = Math.Max(80, Width - x - 20);
+            int textW = wide ? CountW : Math.Max(60, Width - x - 14);
 
             g.DrawString(_applied + " / " + _total, Theme.FontSubTitle,
                 GdiCache.Brush(Theme.TextPrimary), new Rectangle(x, 10, textW, 26));
             Gfx.DrawTextEllipsis(g, "已启用 / 共 " + _total + " 项", Theme.FontMicro, Theme.TextMuted,
                 new Rectangle(x, 36, textW, 16));
 
-            DrawLegend(g, x + 130, 14, Theme.Success, "安全", _safe);
-            DrawLegend(g, x + 130, 36, Theme.Warning, "谨慎", _careful);
+            // 图例只在卡片够宽时画：窄卡上固定偏移会把图例画到卡外，
+            // 宁可只显示计数，也不要出现「已启用 / 共 2…」截断。
+            if (wide)
+            {
+                DrawLegend(g, x + textW + 24, 14, Theme.Success, "安全", _safe);
+                DrawLegend(g, x + textW + 24, 36, Theme.Warning, "谨慎", _careful);
+            }
         }
 
         private static void DrawLegend(Graphics g, int x, int y, Color dot, string label, int count)

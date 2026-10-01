@@ -1,6 +1,7 @@
-﻿using System;
+// 系统还原点页：查看、创建与删除系统还原点
+
+using System;
 using System.Collections.Generic;
-using System.Drawing;
 using System.Threading;
 using System.Windows.Forms;
 using GuyueBox.Core;
@@ -12,9 +13,13 @@ namespace GuyueBox.UI.Views
         private readonly DarkGrid _grid = new DarkGrid();
         private readonly StatStrip _summary = new StatStrip();
         private readonly NoticeBar _notice = new NoticeBar();
+        private readonly EmptyState _empty = new EmptyState();
 
         private readonly List<RestorePoint> _points = new List<RestorePoint>();
         private bool _busy;
+
+        /// <summary>把忙碌状态暴露给基类（加载遮罩 / 状态栏指示 / 截图探针的「等到不忙再拍」）。</summary>
+        public override bool IsBusy { get { return _busy; } }
         private bool _loaded;
         private AccentButton _createButton;
         private AccentButton _deleteButton;
@@ -38,10 +43,7 @@ namespace GuyueBox.UI.Views
             BuildLayout();
         }
 
-        public override bool IsBusy
-        {
-            get { return _busy; }
-        }
+
 
         private void BuildGrid()
         {
@@ -65,9 +67,30 @@ namespace GuyueBox.UI.Views
 
             AddFull(_grid, 320, 0);
 
+            // 空态卡与表格互斥（默认隐藏）：没有还原点或读取失败时说清原因并给下一步动作
+            _empty.Visible = false;
+            AddFull(_empty, 150, 0);
+
             Body.Resize += delegate { Relayout(); };
             Relayout();
             UpdateActions();
+        }
+
+        /// <summary>显示空态/失败卡，动作按钮承担下一步（读取失败→重试；没有还原点→去创建）。</summary>
+        private void ShowEmpty(string title, string sub, string actionText, string icon, EventHandler onAction)
+        {
+            _empty.SetState(title, sub, actionText, icon, onAction);
+            _empty.Visible = true;
+            _grid.Visible = false;
+            Relayout();
+        }
+
+        /// <summary>恢复表格显示（成功取到数据后调用）。</summary>
+        private void ShowGrid()
+        {
+            _empty.Visible = false;
+            _grid.Visible = true;
+            Relayout();
         }
 
         private void Relayout()
@@ -92,15 +115,17 @@ namespace GuyueBox.UI.Views
 
             ThreadPool.QueueUserWorkItem(delegate
             {
+                // List(out error) 内部已兜异常；这里再兜一层，确保后台线程绝不会静默死掉
+                string error = "";
                 List<RestorePoint> result = null;
-                try { result = RestorePoints.List(); }
-                catch { result = new List<RestorePoint>(); }
+                try { result = RestorePoints.List(out error); }
+                catch (Exception ex) { error = ex.Message; result = new List<RestorePoint>(); }
 
                 Post(delegate
                 {
                     _busy = false;
                     _points.Clear();
-                    _points.AddRange(result);
+                    if (result != null) _points.AddRange(result);
                     Render();
 
                     _summary.Clear();
@@ -109,10 +134,27 @@ namespace GuyueBox.UI.Views
                         _points.Count > 0 ? Theme.Success : Theme.TextPrimary);
                     _summary.Invalidate();
 
-                    SetSubtitle(_points.Count > 0
-                        ? "已读取 " + _points.Count + " 个系统还原点。"
-                        : "未检测到还原点，可能系统还原未开启或本盘未受保护。",
-                        _points.Count > 0 ? Theme.Success : Theme.Warning);
+                    // 读取失败 / 没有还原点 / 正常：三种情形分别给出原因与下一步，不再一律"未检测到"
+                    if (error.Length > 0)
+                    {
+                        ShowEmpty("读取系统还原点失败",
+                            error + "\r\n可尝试以管理员身份运行后重试。", "重试", "refresh",
+                            delegate { Load(); });
+                        SetSubtitle("读取系统还原点失败：" + error, Theme.Danger);
+                        return;
+                    }
+
+                    if (_points.Count == 0)
+                    {
+                        ShowEmpty("当前没有系统还原点",
+                            "可能尚未开启「系统保护」，或本盘未受保护。开启后可点这里立即创建一个。",
+                            "创建还原点", "plus", OnCreateClick);
+                        SetSubtitle("未检测到还原点（不是读取失败）。", Theme.Warning);
+                        return;
+                    }
+
+                    ShowGrid();
+                    SetSubtitle("已读取 " + _points.Count + " 个系统还原点。", Theme.Success);
                     Relayout();
                 });
             });
@@ -142,20 +184,8 @@ namespace GuyueBox.UI.Views
         private void OnCreateClick(object sender, EventArgs e)
         {
             if (_busy) return;
-            if (!Native.IsElevated())
-            {
-                bool go = Dialog.Confirm(this, "需要管理员权限",
-                    "创建系统还原点需要管理员权限。\r\n\r\n是否以管理员身份重新启动本程序？");
-                if (go && Shell.RestartElevated(""))
-                {
-                    Application.Exit();
-                }
-                else if (go)
-                {
-                    Dialog.Error(this, "提权失败", "未能以管理员身份启动，请右键程序选择「以管理员身份运行」。");
-                }
-                return;
-            }
+            // 统一走基类门禁：提示文案与「重启提权」出口只在一处维护（原先这里复制了一份提权逻辑）
+            if (!EnsureElevated("创建系统还原点需要管理员权限。")) return;
 
             string name = Dialog.Input(this, "创建还原点",
                 "为这个还原点取一个名称（便于以后识别）：",
@@ -207,6 +237,10 @@ namespace GuyueBox.UI.Views
                 "删除", true))
                 return;
 
+            // 与「创建还原点」对齐：删除同样要管理员权限（WMI 对普通用户直接拒绝访问）。
+            // 此前只有创建有提权出口，删除只能在标准用户下吃一句原始错误，体验自相矛盾。
+            if (!EnsureElevated("删除系统还原点需要管理员权限。")) return;
+
             _busy = true;
             _deleteButton.Enabled = false;
             SetSubtitle("正在删除还原点…", Theme.Warning);
@@ -231,5 +265,6 @@ namespace GuyueBox.UI.Views
                     }
                 });
             });
-        }    }
+        }
+    }
 }

@@ -9,7 +9,7 @@
  *   - 发版清单：tools\make-update-json.ps1 由命令行传入，build.ps1 会校验两者一致
  *
  * 改版本时只需改这里的 Version，然后跑 tools\make-update-json.ps1。
- * 项目：古月工具包（GuyueBox）
+ * 项目：古月工具箱（GuyueBox）
  * ============================================================ */
 
 namespace GuyueBox
@@ -17,6 +17,6 @@ namespace GuyueBox
     internal static class AppInfo
     {
         /// <summary>语义化版本号（不含末尾的 .0 修订位；程序集版本由它补全为四段）。</summary>
-        public const string Version = "1.2.0";
+        public const string Version = "3.0.0";
     }
 }

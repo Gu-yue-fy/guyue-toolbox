@@ -1,10 +1,10 @@
-﻿/* ============================================================
+﻿﻿/* ============================================================
  * 文件说明：程序集属性（名称、版本、说明、版权）。
  *
  * 版本不在这里写死：从 <see cref="GuyueBox.AppInfo.Version"/> 常量拼接，
  * 保证"exe 属性里看到的版本"与"程序界面上显示的版本"永远是同一个值。
  * 改版本请改 src\AppInfo.cs。
- * 项目：古月工具包（GuyueBox）
+ * 项目：古月工具箱（GuyueBox）
  * ============================================================ */
 
 using System.Reflection;
@@ -15,7 +15,7 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyVersion(GuyueBox.AppInfo.Version + ".0")]
 [assembly: AssemblyFileVersion(GuyueBox.AppInfo.Version + ".0")]
 
-[assembly: AssemblyTitle("古月工具包")]
+[assembly: AssemblyTitle("古月工具箱")]
 [assembly: AssemblyProduct("GuyueBox")]
 [assembly: AssemblyCompany("GuyueBox")]
 [assembly: AssemblyDescription("Windows 优化与系统维护工具集：注册表优化、服务与启动项管理、清理与修复，全部改动可一键还原。")]

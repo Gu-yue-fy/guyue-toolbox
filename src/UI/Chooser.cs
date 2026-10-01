@@ -1,4 +1,9 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：轻量选择对话框
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
@@ -72,15 +77,15 @@ namespace GuyueBox.UI
                     Graphics g = e.Graphics;
                     Gfx.EnableSmoothing(g);
 
-                    using (SolidBrush back = new SolidBrush(Theme.CardBg))
+                    SolidBrush back = GdiCache.Brush(Theme.CardBg);
                     {
                         g.FillRectangle(back, f.ClientRectangle);
                     }
-                    using (Pen p = new Pen(Theme.BorderStrong, 1f))
+                    Pen p = GdiCache.Pen(Theme.BorderStrong, 1f);
                     {
                         g.DrawRectangle(p, 0, 0, f.Width - 1, f.Height - 1);
                     }
-                    using (SolidBrush b = new SolidBrush(Theme.Accent))
+                    SolidBrush b = GdiCache.Brush(Theme.Accent);
                     {
                         g.FillRectangle(b, 0, 0, f.Width, 3);
                     }
@@ -89,17 +94,17 @@ namespace GuyueBox.UI
                     Gfx.FillRound(g, box, Theme.RadiusChip, Gfx.Alpha(Theme.Accent, 32));
                     IconPainter.Draw(g, "list", new Rectangle(28, 22, 14, 14), Theme.Accent);
 
-                    using (SolidBrush b = new SolidBrush(Theme.TextPrimary))
+                    SolidBrush titleBrush = GdiCache.Brush(Theme.TextPrimary);
                     using (StringFormat sf = new StringFormat())
                     {
                         sf.LineAlignment = StringAlignment.Center;
                         sf.FormatFlags = StringFormatFlags.NoWrap;
                         sf.Trimming = StringTrimming.EllipsisCharacter;
-                        g.DrawString(dialogTitle, Theme.FontSubTitle, b, new Rectangle(54, 16, 320, 26), sf);
+                        g.DrawString(dialogTitle, Theme.FontSubTitle, titleBrush, new Rectangle(54, 16, 320, 26), sf);
                     }
-                    using (Pen p = new Pen(Theme.Border))
+                    Pen sepLine = GdiCache.Pen(Theme.Border, 1f);
                     {
-                        g.DrawLine(p, 24, 74, f.Width - 24, 74);
+                        g.DrawLine(sepLine, 24, 74, f.Width - 24, 74);
                     }
                 };
 

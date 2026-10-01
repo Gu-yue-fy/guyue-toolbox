@@ -1,0 +1,150 @@
+{
+  "_说明": "外部优化包清单示例（格式 v2）。把本文件（或你自己的包）放到 <程序目录>\\packs\\ 或 %LOCALAPPDATA%\\GuyueBox\\packs\\ 即可在优化中心自动出现：不用装插件、不用编译、不用重启安装。",
+  "_格式": "pack/version/author/description/enabled + items[]；每个 item：id/group/name/desc/admin/risky/recommended/enabled/when/backup/revert/writes",
+  "_writes": "kind 支持 dword | qword | string | expand | multistring | binary(base64) | delete；hive 支持 HKCU/HKLM/HKCR/HKU/HKCC",
+  "_when": "适用条件，不满足则该条不显示、不可应用：vendor=N/A/I（可逗号组合）、cpu=intel/amd、minBuild=Windows 内部版本下限、elevated=true（需管理员）。多个字段是与关系；写错字段名会在「优化包管理」里报错而不是静默忽略。",
+  "_revert": "还原方式，优先级：条目级 revert 数组 > 每条写入的 revertValue（必须全部声明，混用会漏还原，加载时会提示并整项退回备份）> 自动备份还原。",
+  "_backup": "backup=共享备份组标识：同一个注册表键的多个档位项共用一个还原点（与内置「CPU 调度各档」同一机制）。",
+  "_安全": "enabled=false 的包与条目不会被装载；扩展包不能执行任何命令，只能声明注册表写入；外部包无法用重名 Id 覆盖内置优化项（内置优先）。",
+
+  "pack": "示例优化包",
+  "version": "2",
+  "author": "示例作者",
+  "description": "仅用于演示清单格式，默认禁用。把 enabled 改为 true 才会生效。",
+  "enabled": false,
+
+  "items": [
+    {
+      "id": "pack_demo_dword",
+      "group": "系统精简",
+      "name": "示例：写入一个 DWORD 值",
+      "desc": "演示 dword 类型写入（HKCU）。此条仅为格式示例。",
+      "admin": false,
+      "risky": false,
+      "recommended": false,
+      "enabled": true,
+      "writes": [
+        {
+          "hive": "HKCU",
+          "path": "Software\\GuyueBox\\PackDemo",
+          "name": "DemoFlag",
+          "kind": "dword",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "id": "pack_demo_multi",
+      "group": "扩展优化包",
+      "name": "示例：多类型写入 + 删除值",
+      "desc": "演示 string / expand / multistring / binary / delete 五种类型。此条仅为格式示例。",
+      "admin": true,
+      "risky": true,
+      "recommended": false,
+      "enabled": true,
+      "writes": [
+        {
+          "hive": "HKLM",
+          "path": "SOFTWARE\\GuyueBox\\PackDemo",
+          "name": "TextValue",
+          "kind": "string",
+          "value": "hello"
+        },
+        {
+          "hive": "HKCU",
+          "path": "Software\\GuyueBox\\PackDemo",
+          "name": "ExpandValue",
+          "kind": "expand",
+          "value": "%SystemRoot%\\System32"
+        },
+        {
+          "hive": "HKCU",
+          "path": "Software\\GuyueBox\\PackDemo",
+          "name": "MultiValue",
+          "kind": "multistring",
+          "value": ["a", "b", "c"]
+        },
+        {
+          "hive": "HKCU",
+          "path": "Software\\GuyueBox\\PackDemo",
+          "name": "BinaryValue",
+          "kind": "binary",
+          "value": "AQIDBA=="
+        },
+        {
+          "hive": "HKCU",
+          "path": "Software\\GuyueBox\\PackDemo",
+          "name": "ToBeRemoved",
+          "kind": "delete"
+        }
+      ]
+    },
+    {
+      "id": "pack_demo_conditional",
+      "group": "扩展优化包",
+      "name": "示例：只在特定环境下出现",
+      "desc": "演示 when 适用条件（需管理员 + Windows 内部版本 22000 及以上）+ 单条 revertValue 还原。本机不满足条件时，此条不会出现在优化中心，也不会写入任何键。",
+      "admin": true,
+      "risky": false,
+      "recommended": false,
+      "enabled": true,
+      "when": {
+        "elevated": true,
+        "minBuild": 22000
+      },
+      "backup": "pack_demo_group",
+      "writes": [
+        {
+          "hive": "HKLM",
+          "path": "SOFTWARE\\GuyueBox\\PackDemo",
+          "name": "ConditionalFlag",
+          "kind": "dword",
+          "value": 1,
+          "revertValue": 0
+        }
+      ]
+    },
+    {
+      "id": "pack_demo_revert",
+      "group": "扩展优化包",
+      "name": "示例：显式声明怎么改回去",
+      "desc": "演示条目级 revert 数组（优先于备份还原）与 backup 共享备份组：即使备份记录被清掉，也能按这里声明的值还原（含把一个被删除的值重新写回）。",
+      "admin": true,
+      "risky": true,
+      "recommended": false,
+      "enabled": true,
+      "backup": "pack_demo_group",
+      "writes": [
+        {
+          "hive": "HKCU",
+          "path": "Software\\GuyueBox\\PackDemo",
+          "name": "SwitchValue",
+          "kind": "dword",
+          "value": 1
+        },
+        {
+          "hive": "HKCU",
+          "path": "Software\\GuyueBox\\PackDemo",
+          "name": "LegacyKey",
+          "kind": "delete"
+        }
+      ],
+      "revert": [
+        {
+          "hive": "HKCU",
+          "path": "Software\\GuyueBox\\PackDemo",
+          "name": "SwitchValue",
+          "kind": "dword",
+          "value": 0
+        },
+        {
+          "hive": "HKCU",
+          "path": "Software\\GuyueBox\\PackDemo",
+          "name": "LegacyKey",
+          "kind": "string",
+          "value": "restored"
+        }
+      ]
+    }
+  ]
+}

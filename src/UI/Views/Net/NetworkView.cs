@@ -1,4 +1,9 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：网络中心页：状态卡、适配器与 DNS、端口占用
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Threading;
@@ -18,28 +23,25 @@ namespace GuyueBox.UI.Views
         private readonly StatCard _gatewayCard = new StatCard();
         private readonly StatCard _internetCard = new StatCard();
         private readonly StatCard _dnsCard = new StatCard();
-        private readonly InfoList _diag = new InfoList();
         private readonly InfoList _dnsInfo = new InfoList();
         private readonly InfoList _mtuInfo = new InfoList();
 
         private readonly DarkGrid _adapterGrid = new DarkGrid();
-        private readonly ComboBox _adapterBox = new ComboBox();
-        private readonly ComboBox _presetBox = new ComboBox();
-        private readonly Label _currentDns = new Label();
         private readonly TextBox _portInput = new TextBox();
         private readonly DarkGrid _portGrid = new DarkGrid();
 
         private AccentButton _diagButton;
-        private AccentButton _dnsApply;
-        private AccentButton _dnsReset;
         private AccentButton _portQuery;
         private AccentButton _portKill;
 
         private bool _busy;
+
+        /// <summary>把忙碌状态暴露给基类（加载遮罩 / 状态栏指示 / 截图探针的「等到不忙再拍」）。</summary>
         public override bool IsBusy { get { return _busy; } }
 
+
         public NetworkView()
-            : base("网络中心", "联网状态 / 适配器总览 / DNS 快切 / 端口占用 / 诊断修复，一页直达")
+            : base("网络诊断", "联网状态 / 适配器总览 / 端口占用 / 一键修复，一页直达")
         {
             _notice.NoticeIcon = "info";
             _notice.NoticeAccent = Theme.Accent;
@@ -50,12 +52,6 @@ namespace GuyueBox.UI.Views
             _internetCard.IconKind = "gauge";
             _dnsCard.IconKind = "doc";
             ResetCards();
-
-            _diag.Caption = "网络诊断";
-            _diag.IconKind = "shield";
-            _diag.CaptionColor = Theme.Accent;
-            // 诊断结果要用户点「开始诊断」后才有：空状态必须给指引，不能留一片空白
-            _diag.EmptyText = "尚未诊断——点击页头「开始诊断」，结果会显示在这里。";
 
             _dnsInfo.Caption = "DNS 配置";
             _dnsInfo.IconKind = "doc";
@@ -109,32 +105,6 @@ namespace GuyueBox.UI.Views
             infoRow.Controls.Add(_mtuInfo);
             AddRow(infoRow);
 
-            // ④ DNS 快切
-            FlowLayoutPanel dnsRow = MakeRow(0, 14);
-            dnsRow.Controls.Add(MakeLabel("DNS 切换", 84, true));
-            _adapterBox.DropDownStyle = ComboBoxStyle.DropDownList;
-            // 宽度按最小窗口（内容区约 807px）反推：本行合计必须装得下，
-            // 否则 FlowLayoutPanel（不换行）会把最右的「当前：…」整段裁掉。
-            _adapterBox.Size = new Size(180, 30);
-            _adapterBox.SelectedIndexChanged += delegate { UpdateCurrentDns(); };
-            dnsRow.Controls.Add(_adapterBox);
-            _presetBox.DropDownStyle = ComboBoxStyle.DropDownList;
-            _presetBox.Size = new Size(150, 30);
-            for (int i = 0; i < DnsSwitch.Presets.Length; i++) _presetBox.Items.Add(DnsSwitch.Presets[i].Name);
-            if (_presetBox.Items.Count > 0) _presetBox.SelectedIndex = 0;
-            dnsRow.Controls.Add(_presetBox);
-            _dnsApply = MakeInlineButton("应用 DNS", ButtonVariant.Primary, OnDnsApply, 110);
-            dnsRow.Controls.Add(_dnsApply);
-            _dnsReset = MakeInlineButton("恢复自动", ButtonVariant.Ghost, OnDnsReset, 110);
-            dnsRow.Controls.Add(_dnsReset);
-            _currentDns.Text = "";
-            _currentDns.ForeColor = Theme.TextMuted;
-            _currentDns.Font = Theme.FontSmall;
-            _currentDns.AutoSize = true;
-            _currentDns.Margin = new Padding(14, 8, 0, 0);
-            dnsRow.Controls.Add(_currentDns);
-            AddRow(dnsRow);
-
             // ④ 端口占用
             FlowLayoutPanel portRow = MakeRow(0, 12);
             portRow.Controls.Add(MakeLabel("端口占用", 84, true));
@@ -147,7 +117,7 @@ namespace GuyueBox.UI.Views
                 if (e.KeyChar == '\r') { OnPortQuery(null, null); e.Handled = true; }
                 else if (!char.IsDigit(e.KeyChar) && !char.IsControl(e.KeyChar)) e.Handled = true;
             };
-            portRow.Controls.Add(_portInput);
+            portRow.Controls.Add(ThemeInput.Wrap(_portInput));
             _portQuery = MakeInlineButton("查询", ButtonVariant.Primary, OnPortQuery, 92);
             portRow.Controls.Add(_portQuery);
             _portKill = MakeInlineButton("结束占用进程", ButtonVariant.Danger, OnPortKill, 140);
@@ -165,17 +135,16 @@ namespace GuyueBox.UI.Views
             _portGrid.AddTextColumn("状态", 130, false);
             _portGrid.AddTextColumn("PID", 70, false);
             _portGrid.AddTextColumn("进程", 200, false);
+            // 未查询时不显示（也就不会占位）：空表格只是一大片空白，没有任何信息。
+            // 点「查询」出结果后再显示，见 OnPortQuery。
+            _portGrid.Visible = false;
             AddFull(_portGrid, 190, 0);
-
-            // ⑤ 诊断结果
-            FlowLayoutPanel diagRow = MakeRow(0, 14);
-            diagRow.Controls.Add(_diag);
-            AddRow(diagRow);
 
             Body.Resize += delegate
             {
-                // 端口表随视口伸缩（适配器表固定高，保证下方内容一屏可见）
-                _portGrid.Height = Math.Max(160, ViewportHeight - 500);
+                // 端口表随视口伸缩（适配器表固定高，保证下方内容一屏可见）；
+                // DNS 快切与自动调优两行已独立成页签（DNS 切换 / MTU 优化），固定占用高度回调
+                _portGrid.Height = Math.Max(160, ViewportHeight - 290);
             };
             RefreshLayout();
         }
@@ -207,7 +176,8 @@ namespace GuyueBox.UI.Views
             b.Text = text;
             b.IconKind = "power";
             b.Variant = v;
-            b.Size = new Size(width, 32);
+            b.Height = Theme.RowButtonHeight;
+            b.FitToText(width);   // width 是「最小宽度」：文字更长时自动放宽，避免被省略号截断
             b.Margin = new Padding(6, 0, 0, 0);
             b.Click += onClick;
             return b;
@@ -235,11 +205,6 @@ namespace GuyueBox.UI.Views
                 _adapterGrid.Rows.Add(a.Name, a.Type, ip, gw, dns, a.SpeedText, a.Status);
             }
 
-            _adapterBox.Items.Clear();
-            List<string> names = DnsSwitch.ListAdapters();
-            for (int i = 0; i < names.Count; i++) _adapterBox.Items.Add(names[i]);
-            if (_adapterBox.Items.Count > 0) _adapterBox.SelectedIndex = 0;
-            UpdateCurrentDns();
             RefreshNetworkInfo(adapters);
         }
 
@@ -283,14 +248,6 @@ namespace GuyueBox.UI.Views
             RefreshLayout();
         }
 
-        private void UpdateCurrentDns()
-        {
-            string adapter = _adapterBox.SelectedItem as string;
-            if (string.IsNullOrEmpty(adapter)) { _currentDns.Text = ""; return; }
-            string dns = DnsSwitch.GetDns(adapter);
-            _currentDns.Text = "当前：" + (string.IsNullOrEmpty(dns) ? "自动获取 (DHCP)" : dns);
-        }
-
         // ---------------- 诊断 ----------------
 
         private void OnDiagClick(object sender, EventArgs e)
@@ -320,7 +277,12 @@ namespace GuyueBox.UI.Views
                 }
                 PingResult direct = NetTools.Ping("223.5.5.5", 4, 2000);
                 PingResult dnsPing = NetTools.Ping("www.baidu.com", 4, 2000);
-                string resolvedDns = DnsSwitch.GetDns(_adapterBox.SelectedItem as string);
+                // 当前 DNS：取第一个有 IP 的已连接适配器
+                string resolvedDns = "";
+                for (int i = 0; i < adapters.Count; i++)
+                {
+                    if (adapters[i].Dns.Count > 0) { resolvedDns = string.Join(" / ", adapters[i].Dns.ToArray()); break; }
+                }
                 if (string.IsNullOrEmpty(resolvedDns)) resolvedDns = "自动 (DHCP)";
 
                 Post(delegate
@@ -338,7 +300,8 @@ namespace GuyueBox.UI.Views
                     {
                         _gatewayCard.SetData("网关延迟", gwPing.Received > 0 ? gwPing.AvgMs.ToString("0") + " ms" : "超时",
                             gwPing.Received > 0 ? Math.Min(100, gwPing.AvgMs / 5.0) : 100,
-                            gateway, gwPing.Received > 0 ? Theme.Success : Theme.Danger);
+                            gwPing.Received > 0 ? gateway + " · 正常" : gateway + " 无响应，检查网线 / Wi-Fi",
+                            gwPing.Received > 0 ? Theme.Success : Theme.Danger);
                     }
                     else
                     {
@@ -347,89 +310,22 @@ namespace GuyueBox.UI.Views
 
                     _internetCard.SetData("外网延迟", direct.Received > 0 ? direct.AvgMs.ToString("0") + " ms" : "超时",
                         direct.Received > 0 ? Math.Min(100, direct.AvgMs / 5.0) : 100,
-                        "223.5.5.5 · 丢包 " + direct.LossPercent.ToString("0") + "%",
+                        direct.Received > 0
+                            ? "223.5.5.5 · 丢包 " + direct.LossPercent.ToString("0") + "%"
+                            : "223.5.5.5 · 不通，检查路由 / 代理设置",
                         direct.Received > 0 ? Theme.Cyan : Theme.Danger);
 
                     bool dnsOk = dnsPing.Received > 0;
+                    // 诊断结论与修复建议直接写在四张卡的脚注上：原先页面底部另有一张「网络诊断」明细卡，
+                    // 内容与状态卡重复（网关 / 外网 / DNS 各说一遍），已删除，避免同一结论两处维护
                     _dnsCard.SetData("DNS 解析", dnsOk ? dnsPing.AvgMs.ToString("0") + " ms" : "失败",
-                        dnsOk ? -1 : 100, resolvedDns, dnsOk ? Theme.Success : Theme.Danger);
+                        dnsOk ? -1 : 100,
+                        dnsOk ? resolvedDns : resolvedDns + " · 建议先「刷新 DNS 缓存」",
+                        dnsOk ? Theme.Success : Theme.Danger);
 
-                    // 诊断明细
-                    _diag.Clear();
-                    _diag.Add("网关连通", gwPing == null ? "未检测到网关" :
-                        (gwPing.Received > 0 ? "正常，平均 " + gwPing.AvgMs.ToString("0") + " ms" : "网关无响应——检查网线/Wi-Fi 连接"));
-                    _diag.Add("外网连通 (223.5.5.5)", direct.Received > 0
-                        ? "正常，平均 " + direct.AvgMs.ToString("0") + " ms"
-                        : "失败——本机到外网不通");
-                    _diag.Add("DNS 解析 + 连通", dnsPing.Received > 0
-                        ? "正常，平均 " + dnsPing.AvgMs.ToString("0") + " ms"
-                        : "失败——建议先「刷新 DNS 缓存」再试");
-                    _diag.Add("当前 DNS", resolvedDns);
-                    _diag.Invalidate();
-
-                    SetSubtitle(online && dnsOk ? "网络正常。" : "诊断完成：存在问题，按提示修复。", online && dnsOk ? Theme.Success : Theme.Warning);
+                    SetSubtitle(online && dnsOk ? "网络正常。" : "诊断完成：存在问题，按卡片脚注修复。",
+                        online && dnsOk ? Theme.Success : Theme.Warning);
                     RefreshLayout();
-                });
-            });
-        }
-
-        // ---------------- DNS ----------------
-
-        private void OnDnsApply(object sender, EventArgs e)
-        {
-            string adapter = _adapterBox.SelectedItem as string;
-            if (string.IsNullOrEmpty(adapter)) { Dialog.Info(this, "未选择", "请先选择网卡。"); return; }
-            if (_presetBox.SelectedIndex < 0) return;
-
-            DnsPreset preset = DnsSwitch.Presets[_presetBox.SelectedIndex];
-            if (!Dialog.Confirm(this, "应用 DNS",
-                "将网卡「" + adapter + "」的 DNS 切换为 " + preset.Name + "：\r\n" +
-                "主 " + preset.Primary + (string.IsNullOrEmpty(preset.Secondary) ? "" : " / 备 " + preset.Secondary) +
-                "\r\n\r\n是否继续？（可随时一键恢复自动获取）")) return;
-
-            _busy = true;
-            _dnsApply.Enabled = false;
-            SetSubtitle("正在应用 DNS…", Theme.Warning);
-            ThreadPool.QueueUserWorkItem(delegate
-            {
-                string error;
-                bool ok = DnsSwitch.Set(adapter, preset.Primary, preset.Secondary, out error);
-                Post(delegate
-                {
-                    _busy = false;
-                    _dnsApply.Enabled = true;
-                    if (ok)
-                    {
-                        SetSubtitle("DNS 已切换为 " + preset.Name + "。立即生效，无需重启。", Theme.Success);
-                        UpdateCurrentDns();
-                    }
-                    else { Dialog.Error(this, "应用失败", error); SetSubtitle("DNS 切换失败。", Theme.Danger); }
-                });
-            });
-        }
-
-        private void OnDnsReset(object sender, EventArgs e)
-        {
-            string adapter = _adapterBox.SelectedItem as string;
-            if (string.IsNullOrEmpty(adapter)) { Dialog.Info(this, "未选择", "请先选择网卡。"); return; }
-
-            _busy = true;
-            _dnsReset.Enabled = false;
-            SetSubtitle("正在恢复自动获取…", Theme.Warning);
-            ThreadPool.QueueUserWorkItem(delegate
-            {
-                string error;
-                bool ok = DnsSwitch.Reset(adapter, out error);
-                Post(delegate
-                {
-                    _busy = false;
-                    _dnsReset.Enabled = true;
-                    if (ok)
-                    {
-                        SetSubtitle("已恢复为自动获取 (DHCP)。", Theme.Success);
-                        UpdateCurrentDns();
-                    }
-                    else { Dialog.Error(this, "恢复失败", error); SetSubtitle("恢复失败。", Theme.Danger); }
                 });
             });
         }
@@ -468,6 +364,12 @@ namespace GuyueBox.UI.Views
                         _portGrid.Rows[idx].Tag = pi;
                     }
                     _portKill.Enabled = _portGrid.Rows.Count > 0;
+                    // 查询过就展示表格（即使没占用也显示，结论由副标题给出）；未查询前保持隐藏不占位
+                    if (!_portGrid.Visible)
+                    {
+                        _portGrid.Visible = true;
+                        RefreshLayout();
+                    }
                     SetSubtitle(hits.Count > 0
                         ? "端口 " + port + " 被 " + hits.Count + " 个连接占用，选中后可结束对应进程。"
                         : "端口 " + port + " 当前没有被占用。", hits.Count > 0 ? Theme.Warning : Theme.Success);
@@ -539,5 +441,6 @@ namespace GuyueBox.UI.Views
                         ok ? Theme.Success : Theme.Warning);
                 });
             });
-        }    }
+        }
+    }
 }

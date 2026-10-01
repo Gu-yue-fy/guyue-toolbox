@@ -1,4 +1,9 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：隐私痕迹清理：最近文档、运行历史、剪贴板等
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Collections.Generic;
 using System.IO;
 using Microsoft.Win32;

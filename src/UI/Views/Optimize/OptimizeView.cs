@@ -1,6 +1,6 @@
-﻿/* ============================================================
+﻿﻿/* ============================================================
  * 文件说明：优化中心：全部注册表优化的浏览/搜索/筛选/开关执行页；行列表按分类懒加载，过滤走可见性切换（零重建）。
- * 项目：古月工具包（GuyueBox）
+ * 项目：古月工具箱（GuyueBox）
  * ============================================================ */
 
 ﻿using System;
@@ -14,618 +14,7 @@ using GuyueBox.Core;
 
 namespace GuyueBox.UI.Views
 {
-    /// <summary>分组标题：点击可折叠/展开该组。</summary>
-    internal sealed class GroupHeader : Control
-    {
-        public string CountText = "";
-        public Color AccentColor = Theme.Accent;
-        public bool Collapsed;
-        public event EventHandler CollapsedChanged;
-
-        public GroupHeader(string title, Color accent)
-        {
-            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
-                     ControlStyles.UserPaint | ControlStyles.ResizeRedraw |
-                     ControlStyles.StandardClick | ControlStyles.StandardDoubleClick, true);
-            Text = title;
-            AccentColor = accent;
-            Height = 42;
-            Margin = new Padding(2, 8, 0, 4);
-            Tag = "stretch";
-            Cursor = Cursors.Hand;
-            A11y.MakeFocusable(this, AccessibleRole.PushButton);
-            AccessibleName = (title == null ? "" : title) + "（可折叠）";
-        }
-
-        /// <summary>键盘可达：Enter / 空格折叠或展开该分组。</summary>
-        protected override void OnKeyDown(KeyEventArgs e)
-        {
-            if (e.KeyCode == Keys.Enter)
-            {
-                e.Handled = true;
-                e.SuppressKeyPress = true;
-                OnClick(EventArgs.Empty);
-                return;
-            }
-            if (e.KeyCode == Keys.Space) { e.Handled = true; e.SuppressKeyPress = true; return; }
-            base.OnKeyDown(e);
-        }
-
-        protected override void OnKeyUp(KeyEventArgs e)
-        {
-            if (e.KeyCode == Keys.Space)
-            {
-                e.Handled = true;
-                e.SuppressKeyPress = true;
-                OnClick(EventArgs.Empty);
-                return;
-            }
-            base.OnKeyUp(e);
-        }
-
-        protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
-        protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
-
-        protected override void OnClick(EventArgs e)
-        {
-            Collapsed = !Collapsed;
-            Invalidate();
-            EventHandler h = CollapsedChanged;
-            if (h != null) h(this, EventArgs.Empty);
-            base.OnClick(e);
-        }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            Graphics g = e.Graphics;
-            Gfx.EnableSmoothing(g);
-
-            using (SolidBrush b = new SolidBrush(Theme.WindowBg))
-            {
-                g.FillRectangle(b, ClientRectangle);
-            }
-
-            int y = Height - 16;
-            using (GraphicsPath p = Gfx.RoundRect(new Rectangle(2, y - 6, 3, 15), 2))
-            using (SolidBrush b = new SolidBrush(AccentColor))
-            {
-                g.FillPath(b, p);
-            }
-
-            using (SolidBrush b = new SolidBrush(Theme.TextPrimary))
-            using (StringFormat sf = new StringFormat())
-            {
-                sf.LineAlignment = StringAlignment.Center;
-                g.DrawString(Text, Theme.FontBodyBold, b, new Rectangle(14, y - 12, 300, 24), sf);
-            }
-
-            if (!string.IsNullOrEmpty(CountText))
-            {
-                using (SolidBrush b = new SolidBrush(Theme.TextMuted))
-                using (StringFormat sf = new StringFormat())
-                {
-                    sf.LineAlignment = StringAlignment.Center;
-                    sf.Alignment = StringAlignment.Far;
-                    g.DrawString(CountText, Theme.FontSmall, b,
-                        new Rectangle(Math.Max(10, Width - 240), y - 12, 190, 24), sf);
-                }
-            }
-
-            // 右侧折叠箭头：展开朝下，折叠朝右
-            Rectangle a = new Rectangle(Width - 26, (Height - 12) / 2, 12, 12);
-            using (Pen p = new Pen(Theme.TextMuted, 1.5f))
-            {
-                if (Collapsed)
-                {
-                    g.DrawLine(p, a.X + 3, a.Y + 2, a.X + 7, a.Y + 6);
-                    g.DrawLine(p, a.X + 7, a.Y + 6, a.X + 3, a.Y + 10);
-                }
-                else
-                {
-                    g.DrawLine(p, a.X + 1, a.Y + 4, a.X + 6, a.Y + 9);
-                    g.DrawLine(p, a.X + 6, a.Y + 9, a.X + 11, a.Y + 4);
-                }
-            }
-
-            if (Focused) A11y.DrawFocusRing(g, new Rectangle(0, 0, Width - 1, Height - 1), Theme.RadiusChip);
-        }
-    }
-
-    /// <summary>
-    /// 优化详情右栏（主从布局的「从」侧）：
-    /// 点击左侧任意优化项后持续显示它的四段式说明与启用/停用操作，
-    /// 取代「每点一次弹一次模态框」的查看方式——对比多行时不必反复开关弹窗。
-    /// </summary>
-    internal sealed class TweakDetailPanel : RoundPanel
-    {
-        private ITweak _tweak;
-        private DetailInfo _info;
-        private readonly AccentButton _action = new AccentButton();
-        private readonly AccentButton _close = new AccentButton();
-        private readonly OptimizeView _owner;
-        private readonly Panel _scroll = new Panel();
-        private readonly Label _title = new Label();
-        private readonly Label _meta = new Label();
-        private readonly Panel _divider = new Panel();
-        private readonly Label _empty = new Label();
-        private readonly Label[] _heads = new Label[5];
-        private readonly Label[] _bodies = new Label[5];
-
-        /// <summary>由页面注入：读取优化项当前是否已启用，保证右栏与左侧开关一致。</summary>
-        public Func<ITweak, bool> StateReader;
-
-        public TweakDetailPanel(OptimizeView owner)
-        {
-            _owner = owner;
-            Radius = Theme.RadiusCard;
-            CornerColor = Theme.WindowBg;   // 圆角外侧露出页面底色，四角自然融合
-
-            // 滚动容器：承载全部说明，过长可滚动，绝不整片空白
-            _scroll.Dock = DockStyle.Fill;
-            _scroll.AutoScroll = true;
-            _scroll.BackColor = Color.Transparent;
-            _scroll.Padding = new Padding(16, 46, 14, 54);
-            _scroll.Resize += delegate { LayoutContent(); };
-            Controls.Add(_scroll);
-
-            _title.AutoSize = true;
-            _title.Font = Theme.FontBodyBold;
-            _title.ForeColor = Theme.TextPrimary;
-            _title.BackColor = Theme.CardBg;
-            _scroll.Controls.Add(_title);
-
-            _meta.AutoSize = true;
-            _meta.Font = Theme.FontSmall;
-            _meta.ForeColor = Theme.TextMuted;
-            _meta.BackColor = Theme.CardBg;
-            _scroll.Controls.Add(_meta);
-
-            _divider.Height = 1;
-            _divider.BackColor = Theme.BorderSoft;
-            _scroll.Controls.Add(_divider);
-
-            string[] labels = new string[] { "这是什么", "为什么会这样", "风险与影响", "是否可撤销", "怎么处理" };
-            for (int i = 0; i < 5; i++)
-            {
-                Label h = new Label();
-                h.AutoSize = true;
-                h.Font = Theme.FontSmall;
-                h.ForeColor = Theme.TextMuted;
-                h.BackColor = Theme.CardBg;
-                h.Text = labels[i];
-                _scroll.Controls.Add(h);
-                _heads[i] = h;
-
-                Label b = new Label();
-                b.AutoSize = true;
-                b.Font = Theme.FontSmall;
-                b.ForeColor = Theme.TextSecondary;
-                b.BackColor = Theme.CardBg;
-                b.UseMnemonic = false;
-                _scroll.Controls.Add(b);
-                _bodies[i] = b;
-            }
-
-            _empty.Text = "点击左侧任意优化项\n它的完整说明会显示在这里";
-            _empty.TextAlign = ContentAlignment.MiddleCenter;
-            _empty.Dock = DockStyle.Fill;
-            _empty.ForeColor = Theme.TextMuted;
-            _empty.Font = Theme.FontBody;
-            _empty.BackColor = Color.Transparent;
-            Controls.Add(_empty);
-
-            _action.Height = 32;
-            _action.Click += delegate
-            {
-                if (_tweak != null && _owner != null) _owner.ToggleFromRail(_tweak);
-            };
-            Controls.Add(_action);
-
-            // 收起按钮（右上角 ×）：让详情栏可主动关闭，列表收回满宽，不再一直占着右侧
-            _close.Text = "×";
-            _close.Variant = ButtonVariant.Ghost;
-            _close.Size = new Size(28, 28);
-            _close.Click += delegate { if (_owner != null) _owner.CloseRail(); };
-            Controls.Add(_close);
-
-            // Z 序实证（本机实测）：先加入者在上层。_scroll 为 Dock=Fill 且最先加入、
-            // 盖住整栏，后加入的 _action/_close 会被压在其下——启用/停用与 × 按钮
-            // 不可见也不可点（"详情栏按键没反应"的直接原因），必须显式置顶。
-            _close.BringToFront();
-            _action.BringToFront();
-
-            Resize += delegate { LayoutRailCtrls(); UpdateRegion(); };
-            LayoutRailCtrls();
-            UpdateRegion();
-        }
-
-        /// <summary>重排栏内浮层控件（关闭按钮固定右上角）。</summary>
-        private void LayoutRailCtrls()
-        {
-            _close.Location = new Point(Width - 34, 10);
-            if (_action != null) _action.Location = new Point(16, Math.Max(8, Height - 44));
-        }
-
-        /// <summary>用圆角 Region 裁剪整栏，确保内容被裁成圆角卡片（控件本身不透明，渲染可靠）。</summary>
-        private void UpdateRegion()
-        {
-            if (Width <= 0 || Height <= 0) return;
-            Region old = this.Region;
-            this.Region = new Region(Gfx.RoundRect(new Rectangle(0, 0, Width, Height), Theme.RadiusCard));
-            if (old != null) old.Dispose();
-        }
-
-        /// <summary>当前展示的优化项（null = 空态）。</summary>
-        public ITweak Current { get { return _tweak; } }
-
-        public bool IsEmpty { get { return _tweak == null; } }
-
-        public void Show(ITweak t, DetailInfo info)
-        {
-            _tweak = t;
-            _info = info;
-            if (t == null || info == null)
-            {
-                _empty.Visible = true;
-                _scroll.Visible = false;
-                _action.Visible = false;
-                return;
-            }
-            _empty.Visible = false;
-            _scroll.Visible = true;
-
-            DetailInfo d = info;
-            _title.Text = string.IsNullOrEmpty(d.Title) ? t.Name : d.Title;
-
-            bool applied = StateReader != null && StateReader(t);
-            string meta = (applied ? "已启用" : "未启用")
-                + (t.Risky ? " · 谨慎项" : " · 安全项")
-                + (t.Recommended ? " · 推荐" : "");
-            _meta.Text = meta;
-            _meta.ForeColor = applied ? Theme.Success : Theme.TextMuted;
-
-            string[] texts = new string[] { d.What, d.Why, d.Risk, d.Reversible, d.How };
-            for (int i = 0; i < 5; i++)
-            {
-                bool emptySection = string.IsNullOrEmpty(texts[i]);
-                _bodies[i].Text = emptySection ? "" : texts[i];
-                _heads[i].Visible = !emptySection;
-                _bodies[i].Visible = !emptySection;
-            }
-            _heads[2].ForeColor = d.RiskTone ? Theme.Warning : Theme.TextMuted;
-            _heads[3].ForeColor = d.Irreversible ? Theme.Warning : Theme.Success;
-
-            SyncAction();
-            LayoutContent();
-        }
-
-        /// <summary>状态可能被行内开关、一键推荐等路径改变，同步一次按钮语义与文案。</summary>
-        public void RefreshState()
-        {
-            if (_tweak != null && _info != null) Show(_tweak, _info);
-        }
-
-        private void SyncAction()
-        {
-            bool has = _tweak != null;
-            _action.Visible = has && _scroll.Visible;
-            if (!has) return;
-            bool applied = StateReader != null && StateReader(_tweak);
-            _action.Text = applied ? "停用此项" : "启用此项";
-            _action.Variant = applied ? ButtonVariant.Ghost : ButtonVariant.Primary;
-            _action.FitToText(96);
-            _action.Location = new Point(16, Math.Max(8, Height - 44));
-        }
-
-        /// <summary>在滚动容器内自上而下排布标题 / 元信息 / 分隔线 / 五个分段。</summary>
-        private void LayoutContent()
-        {
-            int w = _scroll.ClientSize.Width - _scroll.Padding.Left - _scroll.Padding.Right
-                - SystemInformation.VerticalScrollBarWidth;
-            if (w < 60) w = 60;
-            int x = 0;
-            int y = 0;
-
-            _title.MaximumSize = new Size(w, 0);
-            _title.Location = new Point(x, y);
-            y += _title.Height + 6;
-
-            _meta.MaximumSize = new Size(w, 0);
-            _meta.Location = new Point(x, y);
-            y += _meta.Height + 12;
-
-            _divider.SetBounds(x, y, w, 1);
-            y += 13;
-
-            for (int i = 0; i < 5; i++)
-            {
-                if (!_heads[i].Visible) continue;
-                _heads[i].Location = new Point(x, y);
-                y += _heads[i].Height + 4;
-                _bodies[i].MaximumSize = new Size(w, 0);
-                _bodies[i].Location = new Point(x, y);
-                y += _bodies[i].Height + 14;
-            }
-        }
-
-
-    }
-
-    /// <summary>单条优化项。</summary>
-    internal sealed class TweakRow : RoundPanel
-    {
-        public readonly ITweak Tweak;
-
-        private readonly BadgeLabel _badge = new BadgeLabel();
-        private readonly BadgeLabel _rec = new BadgeLabel();
-        private readonly ToggleSwitch _toggle = new ToggleSwitch();
-        private readonly OptimizeView _owner;
-        private bool _applied;
-        private bool _suppressToggle;
-        private bool _hover;
-        private bool _selected;
-        private readonly Color _defaultBorder;
-
-        public TweakRow(ITweak tweak, OptimizeView owner)
-        {
-            Tweak = tweak;
-            _owner = owner;
-
-            BackColor = Theme.CardBg;
-            _defaultBorder = BorderColor;
-            Radius = Theme.RadiusCard;
-            // 64 而非 72：单行更紧凑，同屏多出一行；信息密度靠"领域图标 + 名称 + 描述 + 标签"承担
-            Height = 64;
-            Margin = new Padding(0, 0, 0, 7);
-            Tag = "stretch";
-
-            // 关键修复：行继承自 BufferPanel，基类未开启 StandardClick，
-            // 导致 WinForms 不对该控件派发 Click 事件——行上的
-            // 「Click += 查看详情」永远不触发，表现就是"点了优化项右边没说明"。
-            // 与 GroupHeader 一致，显式开启 StandardClick / StandardDoubleClick。
-            SetStyle(ControlStyles.StandardClick | ControlStyles.StandardDoubleClick, true);
-
-            // 风险标签常显：风险档是这一行的固有属性（对齐设计 mod-tag），
-            // 启用与否由右侧开关表达，不再拿同一个徽标兼表状态。
-            _badge.Size = new Size(58, 20);
-            _badge.Filled = false;
-            _badge.Text = Tweak.Risky ? "谨慎" : "安全";
-            _badge.BadgeColor = Tweak.Risky ? Theme.Warning : Theme.Success;
-            Controls.Add(_badge);
-
-            // 推荐标签：仅推荐项出现
-            if (Tweak.Recommended)
-            {
-                _rec.Size = new Size(48, 20);
-                _rec.Filled = false;
-                _rec.Text = "推荐";
-                _rec.BadgeColor = Theme.Accent;
-                Controls.Add(_rec);
-            }
-
-            _toggle.Size = new Size(40, 22);
-            _toggle.CheckedChanged += OnToggleChanged;
-            Controls.Add(_toggle);
-
-            // 悬停高亮：光标进入行时轻微提亮，指示可交互
-            MouseEnter += delegate { _hover = true; BackColor = Theme.CardHover; Invalidate(); };
-            MouseLeave += delegate { _hover = false; BackColor = Theme.CardBg; Invalidate(); };
-
-            // 行点击 = 查看详情（开关自身会吃掉自己的点击，不会冲突）：
-            // 优化项只有一句描述不足以让人决定是否启用，详情给出四段式解释
-            Click += delegate
-            {
-                if (_owner != null) _owner.ShowTweakDetail(Tweak);
-            };
-
-            Resize += delegate { LayoutChildren(); };
-            LayoutChildren();
-        }
-
-        private void LayoutChildren()
-        {
-            int mid = (Height - 22) / 2;
-            _toggle.Location = new Point(Math.Max(10, Width - 62), mid);
-            int riskX = Math.Max(10, Width - 128);
-            _badge.Location = new Point(riskX, mid + 1);
-            if (_rec.Parent != null) _rec.Location = new Point(Math.Max(10, riskX - 54), mid + 1);
-        }
-
-        /// <summary>分组 → 图标名。行首图标块让 234 行一眼分得清领域，而不是清一色的文字墙。</summary>
-        private static string IconOfGroup(string group)
-        {
-            switch (group)
-            {
-                case "游戏优化": return "play";
-                case "性能加速":
-                case "极限性能": return "bolt";
-                case "网络优化": return "globe";
-                case "系统服务": return "services";
-                case "电源与启动": return "power";
-                case "隐私与安全": return "shield";
-                case "系统精简": return "trash";
-                case "外观与体验": return "feature";
-                case "音频优化": return "list";
-                case "扩展优化包": return "share";
-                default: return "tune";
-            }
-        }
-
-        private static Color ToneOfGroup(string group)
-        {
-            switch (group)
-            {
-                case "游戏优化": return Theme.Purple;
-                case "性能加速":
-                case "极限性能": return Theme.Cyan;
-                case "网络优化": return Theme.Success;
-                case "系统服务": return Theme.Warning;
-                case "隐私与安全": return Theme.Accent;
-                case "系统精简": return Theme.Danger;
-                case "外观与体验": return Theme.Prism;
-                case "音频优化": return Theme.Purple;
-                default: return Theme.Accent;
-            }
-        }
-
-        private void OnToggleChanged(object sender, EventArgs e)
-        {
-            if (_suppressToggle) return;
-            _owner.ToggleTweak(this);
-        }
-
-        public bool IsApplied
-        {
-            get { return _applied; }
-        }
-
-        public void SetState(bool applied)
-        {
-            _applied = applied;
-
-            _suppressToggle = true;
-            _toggle.SetCheckedSilent(applied);
-            _suppressToggle = false;
-
-            // 风险标签常显（见构造函数注释）；启用状态完全由开关表达
-            _badge.Visible = true;
-
-            StartStateAnimation();
-            Invalidate();
-            if (_owner != null) _owner.OnRowStateChanged(this);
-        }
-
-        /// <summary>选中态：右栏正在显示本行时用强调色描边标记（与悬停提亮互不冲突）。</summary>
-        public void SetSelected(bool on)
-        {
-            if (_selected == on) return;
-            _selected = on;
-            BorderColor = on ? Theme.Accent : _defaultBorder;
-            Invalidate();
-        }
-
-        // 状态切换的背景色渐变：全部行共享一个全局动画时钟（单 Timer 驱动所有
-        // 动画中的行），避免 157 个行各自持 Timer——快速连点时动画互不踩踏。
-        private static System.Windows.Forms.Timer _animClock;
-        private static readonly List<TweakRow> _animating = new List<TweakRow>();
-        private int _animStep = 10;
-        private bool _animFrom;
-
-        private static void EnsureAnimClock()
-        {
-            if (_animClock != null) return;
-            _animClock = new System.Windows.Forms.Timer();
-            _animClock.Interval = 15;
-            _animClock.Tick += delegate
-            {
-                for (int i = _animating.Count - 1; i >= 0; i--)
-                {
-                    TweakRow r = _animating[i];
-                    r._animStep += 1;
-                    if (r._animStep >= 10)
-                    {
-                        r._animStep = 10;
-                        _animating.Remove(r);
-                    }
-                    r.Invalidate();
-                }
-                if (_animating.Count == 0) _animClock.Stop();
-            };
-        }
-
-        private void StartStateAnimation()
-        {
-            // 批量场景（方案同步/一键推荐会同时更新大量行）跳过逐行动画，
-            // 避免每帧上百次行重绘引发闪烁；动画只保留给单行操作的反馈。
-            if (!AppSettings.Animations || _animating.Count > 24)
-            {
-                _animStep = 10;
-                Invalidate();
-                return;
-            }
-            _animFrom = !_applied;
-            _animStep = 0;
-            EnsureAnimClock();
-            if (!_animating.Contains(this)) _animating.Add(this);
-            _animClock.Start();
-        }
-
-        private float AnimProgress()
-        {
-            if (_animStep >= 10) return 1f;
-            float t = _animStep / 10f;
-            // EaseOutCubic
-            return 1f - (1f - t) * (1f - t) * (1f - t);
-        }
-
-        private Color AnimBackColor()
-        {
-            // 同描边：只保留"变绿"方向的背景渐变；关闭方向直接回到常态底色（不闪绿）
-            Color off = Theme.CardBg;
-            Color on = Gfx.Blend(Theme.CardBg, Theme.Success, 0.06);
-            float t = AnimProgress();
-            return _applied ? Gfx.Blend(off, on, t) : off;
-        }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            BackColor = AnimBackColor();
-            float t = AnimProgress();
-            // 描边动画只保留"变绿"方向（开启开关的成就反馈）；
-            // 关闭方向恒为普通描边——旧公式 blend(绿,灰,t) 首帧是纯绿，
-            // 每个未启用行初次绘制都会"闪一下绿"（用户可见的渲染缺陷）。
-            Color baseBorder = _applied
-                ? Gfx.Blend(Theme.GlassBorder, Gfx.Alpha(Theme.Success, 110), t)
-                : Theme.GlassBorder;
-            // 悬停描边发亮：指示"整行可点"（详情入口），而不是只有开关能点
-            BorderColor = _hover && !_applied ? Gfx.Alpha(Theme.Accent, 120) : baseBorder;
-            base.OnPaint(e);
-
-            Graphics g = e.Graphics;
-            Gfx.EnableSmoothing(g);
-
-            // 左侧状态条
-            using (GraphicsPath p = Gfx.RoundRect(new Rectangle(0, 14, 3, Height - 28), 2))
-            using (SolidBrush b = new SolidBrush(_applied ? Theme.Success : Theme.Border))
-            {
-                g.FillPath(b, p);
-            }
-
-            // 行首领域图标块：按分组着色。234 行若都是"文字 + 胶囊 + 开关"，
-            // 扫视时找不到落点；有了颜色与图形，领域可以一眼分辨。
-            string group = Tweak.Group == null ? "" : Tweak.Group;
-            Color tone = ToneOfGroup(group);
-            Rectangle iconBox = new Rectangle(14, (Height - 30) / 2, 30, 30);
-            Gfx.FillRound(g, iconBox, Theme.RadiusChip, Gfx.Alpha(tone, _applied ? 64 : 32));
-            IconPainter.Draw(g, IconOfGroup(group),
-                new Rectangle(iconBox.X + 9, iconBox.Y + 9, 12, 12),
-                _applied ? tone : Gfx.Blend(Theme.TextMuted, tone, 0.55));
-
-            // 文本区右边界与右侧「标签组 + 开关」联动避让：推荐标签存在时要再让出一格
-            int leftmost = _badge.Left;
-            if (_rec.Parent != null && _rec.Left < leftmost) leftmost = _rec.Left;
-            int textRight = Math.Max(60, leftmost - 16);
-            int textX = iconBox.Right + 10;
-
-            Gfx.DrawTextEllipsis(g, Tweak.Name, Theme.FontBodyBold, Theme.TextPrimary,
-                new Rectangle(textX, 9, textRight - textX, 22));
-
-            // 悬停时把描述行换成操作提示：行点击 = 打开四段式详情。
-            // 不提示的话用户不会知道行本身可点（页面上显式的可交互控件只有开关）。
-            if (_hover)
-            {
-                Gfx.DrawTextEllipsis(g, "点击查看详情：这是什么 / 为什么 / 怎么处理 / 风险与可撤销",
-                    Theme.FontSmall, Theme.Accent, new Rectangle(textX, 31, textRight - textX, 18));
-            }
-            else
-            {
-                Gfx.DrawTextEllipsis(g, Tweak.Description, Theme.FontSmall, Theme.TextMuted,
-                    new Rectangle(textX, 31, textRight - textX, 18));
-            }
-        }
-    }
-
-    public class OptimizeView : ViewBase
+    public partial class OptimizeView : ViewBase
     {
         private readonly List<ITweak> _tweaks = new List<ITweak>();
         private readonly List<TweakRow> _rows = new List<TweakRow>();
@@ -635,12 +24,12 @@ namespace GuyueBox.UI.Views
         /// <summary>右侧详情栏（主从布局的「从」侧），构造函数中创建。</summary>
         private readonly TweakDetailPanel _rail;
         /// <summary>右栏宽度；列表展开时通过加宽 Body 右内边距为它让位。</summary>
-        private const int RailWidth = 300;
+        /// <summary>详情栏宽度：360 给四段说明留出可读行宽（300 时中文每行仅 8-10 字，竖条观感差）。</summary>
+        private const int RailWidth = 360;
 
-        /// <summary>右栏动画进度：0=完全收起 1=完全展开；点击优化项后由 0 滑到 1（宇奇式滑动浮现）。</summary>
+        /// <summary>右栏动画进度：0=完全收起 1=完全展开；点击优化项后由 0 滑到 1（滑动浮现）。</summary>
         private double _railAnim;
         private bool _railOpening;
-        private readonly System.Windows.Forms.Timer _railAnimTimer = new System.Windows.Forms.Timer();
 
         private readonly Dictionary<string, bool> _states = new Dictionary<string, bool>();
         private readonly Panel _toolbar = new Panel();
@@ -652,13 +41,18 @@ namespace GuyueBox.UI.Views
         private bool _busy;
         private bool _loaded;
         private string _stateFilter;
+        /// <summary>是否显示本机不适用的专属项：默认 false（隐藏），可在工具栏「显示不适用项」开关切换。</summary>
+        private bool _showInapplicable;
         private readonly TextBox _search = new TextBox();
         private string _keyword = "";
         private readonly FlowLayoutPanel _filterRow = new FlowLayoutPanel();
+        /// <summary>工具型控件行（搜索框 + 显示不适用项开关），挂在状态筛选行右侧。</summary>
+        private readonly FlowLayoutPanel _toolsRow = new FlowLayoutPanel();
         private readonly List<AccentButton> _stateChips = new List<AccentButton>();
         private readonly FlowLayoutPanel _profileRow = new FlowLayoutPanel();
         private readonly FlowLayoutPanel _profileChips = new FlowLayoutPanel();
         private string _groupFilter;
+        private bool _fixedGroup; // 构造时定一次：固定分组页只建本组，主页面建全部行（切分类仅切可见性）
         private readonly Dictionary<string, bool> _collapsedGroups = new Dictionary<string, bool>();
 
         /// <summary>外部（磁贴/快捷方式）希望进入页面时直接选中的分类，进入后消费一次。</summary>
@@ -675,15 +69,9 @@ namespace GuyueBox.UI.Views
             }
             catch (Exception ex)
             {
-                try
-                {
-                    using (System.IO.StreamWriter sw = System.IO.File.AppendText(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetEntryAssembly().Location), "rail_diag.log")))
-                    {
-                        sw.WriteLine(DateTime.Now.ToString("HH:mm:ss") + "  [ShowTweakDetail] Build 抛异常，tweak=" + (t == null ? "null" : t.Id));
-                        sw.WriteLine(ex.ToString());
-                    }
-                }
-                catch { }
+                // 详情推导失败记入程序内日志（可在「操作日志」查看）：
+                // 原先这里往程序目录写 rail_diag.log，属调试残留——会在用户机器上留文件且无人看
+                try { RegLog.Add("UI", "优化项详情推导失败", t.Id + " | " + ex.Message); } catch { }
                 // 兜底：推导失败也必须给出非空内容，否则右栏会变成空白黑块（用户感知为"黑块没反应"）
                 info = new DetailInfo();
                 string grp = string.IsNullOrEmpty(t.Group) ? TweakPackProvider.GPack : t.Group;
@@ -696,6 +84,26 @@ namespace GuyueBox.UI.Views
             _rail.Show(t, info);
             OpenRail();   // 点击即让右栏滑出（已展开时也安全：仅确保展开态）
             for (int i = 0; i < _rows.Count; i++) _rows[i].SetSelected(_rows[i].Tweak == t);
+        }
+
+        /// <summary>自动截图辅助：展开第一个可见优化项的右栏详情（--shots 模式调用）。</summary>
+        internal void OpenFirstRail()
+        {
+            for (int i = 0; i < _rows.Count; i++)
+            {
+                if (_rows[i].Visible && _rows[i].Tweak != null)
+                {
+                    ShowTweakDetail(_rows[i].Tweak);
+                    // 泵 700ms 让滑入动画跑完（计时器依赖消息循环），右栏归位后再截图
+                    int end = Environment.TickCount + 700;
+                    while (Environment.TickCount < end)
+                    {
+                        Application.DoEvents();
+                        System.Threading.Thread.Sleep(30);
+                    }
+                    return;
+                }
+            }
         }
 
         /// <summary>右栏按钮触发的开关：定位到对应行后复用行级 ToggleTweak（含危险确认与备份链）。</summary>
@@ -732,6 +140,7 @@ namespace GuyueBox.UI.Views
             // 固定分组模式：必须同时设 _extraGroups 才会真正过滤——FilterByGroups 只在
             // _extraGroups 非空时生效，只设 _groupFilter 的话该参数形同虚设。
             bool fixedGroup = !string.IsNullOrEmpty(groupFilter);
+            _fixedGroup = fixedGroup;
             _extraGroups = fixedGroup ? new string[] { groupFilter } : null;
 
             _notice.NoticeIcon = "info";
@@ -741,7 +150,7 @@ namespace GuyueBox.UI.Views
                 BuildHardwareHint();
 
             AddAction("一键推荐优化", "bolt", ButtonVariant.Primary, OnRecommendedClick, 152);
-            AddAction("全部还原", "refresh", ButtonVariant.Ghost, OnRestoreAllClick, 110);
+            AddAction("全部还原", "undo", ButtonVariant.Danger, OnRestoreAllClick, 110);
             if (!fixedGroup)
             {
                 // 方案库与方案文件都是跨分类功能：固定分组页里放它们会误导（保存出来的是残缺方案）
@@ -749,20 +158,26 @@ namespace GuyueBox.UI.Views
                 AddAction("导入方案", "plus", ButtonVariant.Secondary, OnImportProfile, 110);
             }
             AddAction("刷新状态", "refresh", ButtonVariant.Secondary, delegate { Load(true); }, 110);
+            _sortButton = AddAction("排序：推荐优先", "sort", ButtonVariant.Ghost, OnSortClick, 130);
 
             AddFull(_notice, 30, 8);
 
-            // 页头压缩：健康卡与状态筛选并成一行（各占一半）。
-            // 优化中心的可用性直接由"首屏能看到几行"决定，每省一行竖高就多露一整行优化项。
+            // 健康卡单独一行；搜索框与「显示不适用项」下移到状态筛选行（见 BuildToolbar）。
+            // 原先二者同一行：健康卡 76px 高会把那一行撑到 76px，28px 的搜索框贴在行顶部、
+            // 下方空一大截 —— 就是用户反馈的"搜索框非要那么高"。
             BuildToolbar();
             FlowLayoutPanel row = MakeRow(0, 8);
-            _filterRow.Margin = new Padding(0);
+            // 自然宽度行不拉宽子项。宽度给到能显示「安全 / 谨慎」图例
+            //（ModuleHealthCard 要求 Width ≥ 环右缘 + 260，否则图例整块不画、右侧留白）
+            _health.Width = 380;
             row.Controls.Add(_health);
-            row.Controls.Add(_filterRow);
             AddRow(row);
 
-            // 固定分组页 = 设计式「模块页」：只保留状态筛选，不再出现主分类切换与方案库
+            // 固定分组页 = 设计式「模块页」：只保留状态筛选，不再出现主分类切换与方案库。
+            // 三组切换（分类 / 状态 / 方案）各自独立成行、一律左起、尺寸与间距一致；
+            // 原先状态 chip 挤在健康卡那半行里，两组切换分散在两处、观感不统一。
             if (!fixedGroup) AddFull(_toolbar, 30, 6);
+            if (!fixedGroup) AddFull(_filterRow, 30, 6);
             if (!fixedGroup) AddFull(_profileRow, 30, 8);
             AddExtraControls();
             Relayout();
@@ -783,8 +198,7 @@ namespace GuyueBox.UI.Views
             // 详情栏会被整宽内容面板盖住——不可见也不可点，用户感知为"按了没反应"。
             _rail.BringToFront();
             Body.Padding = new Padding(Theme.PagePadX, Theme.PagePadTop, Theme.PagePadX, Theme.PagePadBottom);
-            _railAnimTimer.Interval = 16;
-            _railAnimTimer.Tick += delegate { RailAnimTick(); };
+            // 右栏滑入/滑出由全局 AnimationClock 驱动（16ms 粒度）
             Resize += delegate { PositionRail(); };
             PositionRail();
         }
@@ -794,8 +208,20 @@ namespace GuyueBox.UI.Views
         /// _rail 已在构造中加入后显式置顶，这里无需再动 z 序。</summary>
         private void PositionRail()
         {
-            int hh = EmbedHeader ? ActionBarHeight : HeaderHeight;
+            int hh = EffectiveHeader;
+            // 顶到页首工具行（通知条 / 健康卡+搜索行 / 分类条 / 方案库行）之下，不遮搜索框
             int y = hh + Theme.PagePadTop;
+            // 取各工具行的底边（_toolsRow.Parent = 「健康卡 + 搜索」那一行）
+            Control[] tops = new Control[] { _notice, _health.Parent, _toolbar, _filterRow, _profileRow };
+            int maxBottom = 0;
+            for (int i = 0; i < tops.Length; i++)
+            {
+                Control c = tops[i];
+                if (c == null || c.Parent == null || c.Height <= 0) continue;
+                int bottom = c.Top + c.Height + c.Margin.Bottom;
+                if (bottom > maxBottom) maxBottom = bottom;
+            }
+            y += Math.Max(maxBottom, 82) + 4; // 82=通知条+搜索行的固定下限，防滚动后误上移
             int h = Math.Max(0, ClientSize.Height - y - Theme.PagePadBottom);
             int finalX = Math.Max(0, ClientSize.Width - Theme.PagePadX - RailWidth);
             // 收起进度越高越靠右推：_railAnim=0 时整栏在视口外，滑到 1 时归位
@@ -803,34 +229,47 @@ namespace GuyueBox.UI.Views
             _rail.SetBounds(x, y, RailWidth, h);
         }
 
-        /// <summary>点击优化项：列表让出右侧空间，详情栏从右缘滑动浮现（宇奇式主从交互）。</summary>
+        /// <summary>点击优化项：列表让出右侧空间，详情栏从右缘滑动浮现（主从两栏交互）。</summary>
         private void OpenRail()
         {
             _rail.Visible = true;
             _railOpening = true;
             Body.Padding = new Padding(Theme.PagePadX, Theme.PagePadTop,
                 Theme.PagePadX + RailWidth + 10, Theme.PagePadBottom);
-            _railAnimTimer.Start();
+            // 列表让位变窄后筛选行可能换行变高，页首行底边随之下移——
+            // 立即重算右栏顶部，否则 y 停在旧值会把换行后的搜索框盖住。
+            PositionRail();
+            AnimationClock.Instance.Subscribe(RailTick);
         }
 
         /// <summary>收起详情栏：滑出右缘后隐藏，列表收回满宽。</summary>
         internal void CloseRail()
         {
-            if (_railAnim <= 0) { _rail.Visible = false; return; }
             _railOpening = false;
-            _railAnimTimer.Start();
+            if (_railAnim <= 0)
+            {
+                // 已收起：这里必须把"列表右侧让位"的宽度一起还原。
+                // 原实现直接 return —— 若 OpenRail 刚加宽 Body 右内边距、滑动动画还没跑到第一帧
+                // （_railAnim 仍为 0）就关闭，列表右侧会留下一条永不回收的深色空带，
+                // 用户看到的就是"右边多出一个黑框挡住内容"。
+                _rail.Visible = false;
+                Body.Padding = new Padding(Theme.PagePadX, Theme.PagePadTop, Theme.PagePadX, Theme.PagePadBottom);
+                PositionRail();
+                return;
+            }
+            AnimationClock.Instance.Subscribe(RailTick);
         }
 
         /// <summary>每帧推进右栏滑入/滑出动画，匀速逼近目标，手感顺滑。</summary>
-        private void RailAnimTick()
+        private void RailTick()
         {
-            double step = 0.16;
+            double step = Theme.Motion.RailStep;
             _railAnim += _railOpening ? step : -step;
-            if (_railAnim >= 1) { _railAnim = 1; _railAnimTimer.Stop(); }
+            if (_railAnim >= 1) { _railAnim = 1; AnimationClock.Instance.Unsubscribe(RailTick); }
             if (_railAnim <= 0)
             {
                 _railAnim = 0;
-                _railAnimTimer.Stop();
+                AnimationClock.Instance.Unsubscribe(RailTick);
                 _rail.Visible = false;
                 Body.Padding = new Padding(Theme.PagePadX, Theme.PagePadTop, Theme.PagePadX, Theme.PagePadBottom);
                 PositionRail();
@@ -839,9 +278,167 @@ namespace GuyueBox.UI.Views
             PositionRail();
         }
 
-        /// <summary>扩展点：在列表上方追加本页专属控件。</summary>
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                // 右栏滑入动画随页面一起停掉：否则关页后仍在跑并持有已释放的行控件
+                AnimationClock.Instance.Unsubscribe(RailTick);
+                TweakRow.ShutdownAnimClock();
+                _building = false;   // 分片构建的下一帧回调据此直接退出，不再访问已释放的 Body
+            }
+            base.Dispose(disposing);
+        }
+
+        /// <summary>扩展点：在列表上方追加本页专属控件。优化中心在这里挂「本机专属推荐」卡。</summary>
         protected virtual void AddExtraControls()
         {
+            if (!string.IsNullOrEmpty(_groupFilter)) return; // 固定分组页（模块页）不显示
+            BuildVendorCard();
+        }
+
+        private Label MakeLabel(string text, int width, bool bold)
+        {
+            Label l = new Label();
+            l.Text = text;
+            l.ForeColor = bold ? Theme.TextPrimary : Theme.TextMuted;
+            l.Font = bold ? Theme.FontBodyBold : Theme.FontBody;
+            l.TextAlign = ContentAlignment.MiddleLeft;
+            if (width > 0) l.Size = new Size(width, 30);
+            else l.AutoSize = true;
+            l.Margin = new Padding(0, 0, 8, 0);
+            return l;
+        }
+
+        /// <summary>本机专属推荐卡：检测 CPU/GPU 厂商，列出可用专属项，一键应用。
+        /// v2.2 拆两行：第一行「标签+硬件摘要+按钮」，第二行「项名称」——
+        /// 单行 FlowLayoutPanel 在 1180 最小窗口下总宽溢出，文字会与按钮叠在一起。</summary>
+        private void BuildVendorCard()
+        {
+            List<ITweak> vendorTweaks = HardwareRecommender.CollectApplicable();
+            string summary = HardwareRecommender.HardwareSummary();
+
+            if (vendorTweaks.Count == 0)
+            {
+                FlowLayoutPanel row0 = MakeRow(0, 10);
+                row0.Controls.Add(MakeLabel("专属优化", 84, true));
+                Label none = MakeLabel("（未识别到本机专属优化项）", 260, false);
+                none.Margin = new Padding(12, 8, 0, 0);
+                row0.Controls.Add(none);
+                AddRow(row0);
+                return;
+            }
+
+            // 名称列表过长会溢出截断：最多展示 2 个名称 + 等计（完整清单在确认弹窗里看）
+            const int Show = 2;
+            string names = "";
+            for (int i = 0; i < vendorTweaks.Count && i < Show; i++)
+            {
+                if (i > 0) names += " · ";
+                names += vendorTweaks[i].Name;
+            }
+            if (vendorTweaks.Count > Show) names += " 等 " + vendorTweaks.Count + " 项";
+
+            // 第一行：标签 + 硬件摘要 + 项数 + 应用按钮。
+            // 不能用 FlowLayoutPanel：LayoutRowChildren 会把行内非 AutoSize 控件**等分**宽度，
+            // 「专属优化」标签被撑到 1/3 行宽，摘要文字因此落到行的中间（用户反馈"非要在中间"）。
+            // 这里用普通 Panel 手动摆位：标签固定宽 → 摘要紧跟其后 → 按钮贴右。
+            Panel row1 = new Panel();
+            row1.BackColor = Theme.WindowBg;
+
+            Label tagLabel = MakeLabel("专属优化", 84, true);
+            Label title = MakeLabel(summary + " · " + vendorTweaks.Count + " 项可用", 0, true);
+            title.AutoSize = true;
+
+            AccentButton apply = new AccentButton();
+            apply.Text = "应用专属推荐";
+            apply.IconKind = "bolt";
+            apply.Variant = ButtonVariant.Primary;
+            apply.Height = 30;
+            apply.FitToText(120);
+            apply.Click += delegate { ApplyVendorRec(vendorTweaks); };
+
+            row1.Controls.Add(tagLabel);
+            row1.Controls.Add(title);
+            row1.Controls.Add(apply);
+            // 标签右缘 → 摘要起点留 14px：原先只留 8px，「专属优化」与摘要挤在一起像连成一个词
+            const int TagW = 84;
+            const int TextX = TagW + 14;
+            row1.Resize += delegate
+            {
+                int h = row1.ClientSize.Height;
+                int ty = Math.Max(0, (h - 30) / 2);
+                int right = row1.ClientSize.Width - apply.Width - 2;
+                tagLabel.SetBounds(0, ty, TagW, 30);
+                // 标题过长时截断让位：按钮永远钉在右缘以内。
+                // 此前 bx 取 Max(title.Right + 12, right)，标题一长按钮就被推出窗口边缘裁掉。
+                title.MaximumSize = new Size(Math.Max(40, right - TextX - 12), 30);
+                title.SetBounds(TextX, ty, title.PreferredWidth, 30);
+                apply.SetBounds(right, Math.Max(0, (h - apply.Height) / 2), apply.Width, apply.Height);
+            };
+            AddFull(row1, 32, 6);
+
+            // 第二行：项名称（缩进对齐摘要，独占整行不再与按钮同排）
+            FlowLayoutPanel row2 = MakeRow(0, 10);
+            Label pad = MakeLabel("", 84, false);
+            row2.Controls.Add(pad);
+            Label list = MakeLabel(names, 0, false);
+            list.MaximumSize = new Size(700, 64);   // 放宽：520 时中文名称常被折成两行
+            // 缩进对齐第一行的摘要起点（TagW 84 + pad 的 8 + 这里 6 = 98）：
+            // 原先 12 → 起点 104，比摘要右移 6px，两行的左缘看着是错的
+            list.Margin = new Padding(6, 0, 0, 0);
+            row2.Controls.Add(list);
+            AddRow(row2);
+        }
+
+        private void ApplyVendorRec(List<ITweak> targets)
+        {
+            if (_busy) return;
+            List<ITweak> todo = new List<ITweak>();
+            for (int i = 0; i < targets.Count; i++)
+            {
+                bool applied = false;
+                _states.TryGetValue(targets[i].Id, out applied);
+                if (!applied) todo.Add(targets[i]);
+            }
+            if (todo.Count == 0)
+            {
+                Dialog.Info(this, "已应用", "本机专属推荐项都已启用，无需重复操作。");
+                return;
+            }
+
+            string list = "";
+            for (int i = 0; i < todo.Count; i++) list += "· " + todo[i].Name + "\r\n";
+            if (!Dialog.Confirm(this, "应用专属优化",
+                "将启用以下 " + todo.Count + " 项本机硬件专属优化：\r\n\r\n" + list +
+                "\r\n所有改动都会被备份，可随时单独还原。是否继续？"))
+                return;
+
+            int okCount = 0, failCount = 0, adminNeeded = 0;
+            for (int i = 0; i < todo.Count; i++)
+            {
+                ITweak t = todo[i];
+                if (!TweakApplicability.IsApplicable(t)) continue; // 不适用本机硬件的专属项直接跳过
+                if (t.AdminOnly && !Native.IsElevated()) { adminNeeded++; failCount++; continue; }
+                if (TweakExecutor.Apply(t).IsOk) { okCount++; _states[t.Id] = true; }
+                else { failCount++; }
+            }
+            SyncRows();
+            UpdateSummary();
+            SetSubtitle("专属优化完成：" + okCount + " 项成功。", failCount > 0 ? Theme.Warning : Theme.Success);
+        }
+
+        /// <summary>行首小标签（"分类" / "状态"）：三组切换一眼可辨，不再是一堆不知筛什么的 chip。</summary>
+        private static Label RowTag(string text)
+        {
+            Label l = new Label();
+            l.Text = text;
+            l.ForeColor = Theme.TextMuted;
+            l.Font = Theme.FontSmall;
+            l.TextAlign = ContentAlignment.MiddleLeft;
+            l.Size = new Size(40, 30);
+            l.Margin = new Padding(0, 0, 6, 0);
+            return l;
         }
 
         private void BuildToolbar()
@@ -849,13 +446,22 @@ namespace GuyueBox.UI.Views
             _toolbar.BackColor = Theme.WindowBg;
             _toolbar.Height = 34;
 
-            // 状态筛选 + 方案库行：筛选行允许换行（WrapContents），
-            // 否则 5 个状态 chip + 搜索框在半宽行里会被裁掉最后一个「谨慎」chip
+            // 工具行（搜索 + 不适用项开关）：跟在健康卡右侧，按自然宽度排布
+            _toolsRow.FlowDirection = FlowDirection.LeftToRight;
+            _toolsRow.WrapContents = false;
+            _toolsRow.AutoSize = true;
+            _toolsRow.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            _toolsRow.BackColor = Theme.WindowBg;
+            _toolsRow.Margin = new Padding(12, 0, 0, 0);
+
+            // 状态筛选行：独立成行（整宽），不再与健康卡分半行 —— 5 个 chip 放得下，也不会被裁
             _filterRow.FlowDirection = FlowDirection.LeftToRight;
-            _filterRow.WrapContents = true;
-            _filterRow.AutoSize = true;
-            _filterRow.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            _filterRow.WrapContents = false;
+            _filterRow.AutoSize = false;
             _filterRow.BackColor = Theme.WindowBg;
+            _filterRow.Height = 30;
+            _filterRow.Margin = new Padding(0);
+            _filterRow.Controls.Add(RowTag("状态"));
 
             string[] stateChips = new string[] { "全部状态", "已启用", "未启用", "推荐", "谨慎" };
             string[] stateKeys = new string[] { null, "on", "off", "rec", "risky" };
@@ -888,13 +494,35 @@ namespace GuyueBox.UI.Views
             _search.Font = Theme.FontBody;
             _search.Size = new Size(200, 28);
             Native.SetCue(_search, "搜索优化项…");
-            _search.Margin = new Padding(8, 0, 0, 0);
+            _search.Margin = new Padding(0, 0, 0, 0);
             _search.TextChanged += delegate
             {
                 _keyword = _search.Text.Trim();
                 ApplyFilters();
             };
-            _filterRow.Controls.Add(_search);
+            _toolsRow.Controls.Add(ThemeInput.WrapSearch(_search));
+
+            // 不适用项开关：默认隐藏本机不适用的专属项；开启后显示它们（开关仍 inert，应用会被拒绝）
+            AccentButton showInapplicable = new AccentButton();
+            showInapplicable.Text = "显示不适用项";
+            showInapplicable.Variant = ButtonVariant.Ghost;
+            showInapplicable.Height = 28;
+            showInapplicable.FitToText(96);
+            showInapplicable.Margin = new Padding(8, 0, 0, 0);   // 与搜索框之间留间距
+            showInapplicable.Click += delegate
+            {
+                _showInapplicable = !_showInapplicable;
+                showInapplicable.Variant = _showInapplicable ? ButtonVariant.Primary : ButtonVariant.Ghost;
+                ApplyFilters();
+                SetSubtitle(_showInapplicable ? "已显示本机不适用项（灰显，应用会被拒绝）" : "已隐藏本机不适用项",
+                    Theme.TextSecondary);
+            };
+            _toolsRow.Controls.Add(showInapplicable);
+
+            // 搜索 + 不适用项开关：挂在状态筛选行右侧（那一行只有 5 个 chip，右侧空着），
+            // 行高 30px 而不是健康卡行的 76px —— 页头少占竖高，首屏多露一行优化项。
+            _toolsRow.Margin = new Padding(18, 0, 0, 0);
+            _filterRow.Controls.Add(_toolsRow);
 
             // 方案行：独立一行，避免与状态筛选挤在一行被裁剪
             _profileRow.FlowDirection = FlowDirection.LeftToRight;
@@ -904,7 +532,8 @@ namespace GuyueBox.UI.Views
             _profileRow.Tag = "stretch";
 
             AccentButton saveProfile = new AccentButton();
-            saveProfile.Text = "＋保存方案";
+            saveProfile.Text = "保存方案";
+            saveProfile.IconKind = "plus";   // 原来用全角「＋」拼在文字里，与其它按钮的图标体系不一致
             saveProfile.Variant = ButtonVariant.Secondary;
             saveProfile.Height = 28;
             saveProfile.FitToText(72);
@@ -915,7 +544,8 @@ namespace GuyueBox.UI.Views
             BuildProfileChips();
             _profileRow.Controls.Add(_profileChips);
 
-            // 搜索框已移除：分类直接可见可点，无需搜索
+            // 分类切换：独立一行，与状态 / 方案行同规格（左起、同高、同间距）
+            _toolbar.Controls.Add(RowTag("分类"));
             _toolbar.Controls.Add(_chips);
 
             // 分类筛选条：收敛为 5 个主要分类（对应底层分组聚合）
@@ -938,29 +568,39 @@ namespace GuyueBox.UI.Views
                 _chips.Controls.Add(chip);
             }
 
+            // 从行首标签之后开始排（46 = 标签宽 40 + 间距 6），否则 chip 条会盖住「分类」标签
             _toolbar.Resize += delegate
             {
-                _chips.SetBounds(0, 0, Math.Max(60, _toolbar.Width), 34);
+                _chips.SetBounds(46, 0, Math.Max(60, _toolbar.Width - 46), 34);
             };
-            _chips.SetBounds(0, 0, Math.Max(60, _toolbar.Width), 34);
+            _chips.SetBounds(46, 0, Math.Max(60, _toolbar.Width - 46), 34);
         }
 
         /// <summary>主分类名与对应的底层分组集合（索引 0 = 全部）。</summary>
         private static readonly string[] CategoryNames = new string[]
         {
-            "全部", "游戏", "系统性能", "网络", "隐私与精简"
+            "全部", "游戏", "性能与电源", "网络", "隐私与安全", "系统服务", "精简与外观", "音频"
         };
 
+        /// <summary>
+        /// 分类聚合必须覆盖 TweakLibrary 的**全部分组**：
+        /// 此前「极限性能」（17 项）不在任何分类里 —— 切到任一分类都看不到它们，只有"全部"才可见；
+        /// 「外观与体验」也被塞进"隐私与精简"，名不副实。这里按名称语义重新归并（10 组 → 全部覆盖）。
+        /// </summary>
         private static readonly string[][] CategoryGroups = new string[][]
         {
             null,
             new string[] { TweakLibrary.GGame },
-            new string[] { TweakLibrary.GPerformance, TweakLibrary.GPower, TweakLibrary.GServices, TweakLibrary.GAudio },
+            new string[] { TweakLibrary.GPerformance, TweakLibrary.GExtreme, TweakLibrary.GPower },
             new string[] { TweakLibrary.GNetwork },
-            new string[] { TweakLibrary.GPrivacy, TweakLibrary.GSlim, TweakLibrary.GAppearance }
+            new string[] { TweakLibrary.GPrivacy },
+            new string[] { TweakLibrary.GServices },
+            new string[] { TweakLibrary.GSlim, TweakLibrary.GAppearance },
+            new string[] { TweakLibrary.GAudio }
         };
 
-        /// <summary>切换到指定主分类：可打断在途探测（旧结果按会话令牌作废），立即切换。</summary>
+        /// <summary>切换到指定主分类：行与状态探测已覆盖全部优化项（只建一次），
+        /// 切分类只改变可见性集合（ApplyFilters 毫秒级），不再清空重建——这是消除切分类卡顿的关键。</summary>
         private void ApplyCategory(int index)
         {
             if (index < 0 || index >= CategoryNames.Length) return;
@@ -972,13 +612,16 @@ namespace GuyueBox.UI.Views
                     ? ButtonVariant.Primary : ButtonVariant.Ghost;
                 _chipButtons[k].Invalidate();
             }
-            _loadGen++;      // 在途探测结果全部作废
-            _busy = false;   // 允许新会话立即开始（点多快都能立即响应）
-            _loaded = false;
-            _tweaks.Clear();
-            _states.Clear();
-            ClearRows();
-            Load(false);
+            // 注意：此处刻意不清空 _tweaks/_states/_rows，也不调用 Load。
+            // 后台探测始终针对全部优化项并写 _states，切分类只是可见性重算，
+            // 隐藏行也已被探测回填真实状态，切回即正确显示，无需重建。
+            ApplyFilters();
+            // 切换分类后让新露面的行依次落位：整屏内容换掉时给一点过渡，而不是"啪"地一下
+            Post(delegate { CascadeVisibleRows(); });
+            int vis = 0;
+            for (int i = 0; i < _rows.Count; i++) if (_rows[i].Visible) vis++;
+            SetSubtitle(CategoryNames[index] + "：" + vis + " 项优化" +
+                (_loaded ? "" : "，正在读取状态…"), Theme.TextSecondary);
         }
 
         // 注意：本页刻意不 override IsBusy——状态探测期间行列表已即时渲染，
@@ -1010,7 +653,150 @@ namespace GuyueBox.UI.Views
             string gpu = GpuLatencyTweak.DetectVendor() == "N" ? "NVIDIA 显卡"
                 : GpuLatencyTweak.DetectVendor() == "A" ? "AMD 显卡"
                 : GpuLatencyTweak.DetectVendor() == "I" ? "Intel 核显" : "未知显卡";
-            return "（本机：" + cpu + " + " + gpu + "，不适用本机硬件的专属项会自动不可用）";
+            return "（本机：" + cpu + " + " + gpu + "，不适用本机硬件的专属项会自动隐藏，可用工具栏「显示不适用项」开关查看）";
+        }
+
+        /// <summary>让当前可见的前若干行做一次级联入场（展开分组 / 切换分类后的过渡）。</summary>
+        private void CascadeVisibleRows()
+        {
+            if (!AppSettings.Animations || _rows.Count == 0) return;
+            List<Control> list = new List<Control>();
+            for (int i = 0; i < _rows.Count && list.Count < 10; i++)
+            {
+                if (_rows[i].Visible) list.Add(_rows[i]);
+            }
+            if (list.Count == 0) return;
+            CascadeIn(list);
+        }
+
+        private bool _groupAnimBusy;
+        /// <summary>正在做"展开动画"的分组名：BuildRows 时该组新行以 1px 起始高度建出。</summary>
+        private string _expandAnimGroup;
+
+        /// <summary>
+        /// 折叠 / 展开分组：内容以高度插值收拢 / 展开（约 240ms），而不是瞬间切换。
+        /// 行数超过 40 的组直接切换——每帧重排那么多行的代价大于观感收益（与整体"减少卡顿"的取舍一致）。
+        /// 动画期间忽略重复点击（直接切换），避免两段动画互相打架。
+        /// </summary>
+        private void AnimateGroupToggle(string group, bool collapse)
+        {
+            if (!AppSettings.Animations || _groupAnimBusy)
+            {
+                _collapsedGroups[group] = collapse;
+                BuildRows(true);   // 紧随其后要用行集合，必须同步建完
+                return;
+            }
+
+            if (!collapse)
+            {
+                // 展开：先把行以 1px 建出来，再让它们长回正常高度
+                _groupAnimBusy = true;
+                _expandAnimGroup = group;
+                _collapsedGroups[group] = false;
+                BuildRows(true);   // 紧接着 CollectGroupRows 要拿这些新行做展开动画
+                _expandAnimGroup = null;
+
+                List<TweakRow> grow = CollectGroupRows(group);
+                if (grow.Count == 0 || grow.Count > 40)
+                {
+                    _groupAnimBusy = false;
+                    for (int i = 0; i < grow.Count; i++)
+                    {
+                        if (grow[i].IsDisposed) continue;
+                        grow[i].SuppressAutoHeight = false;
+                        grow[i].Height = grow[i].NormalHeight;
+                    }
+                    RefreshLayout();
+                    return;
+                }
+                int[] target = new int[grow.Count];
+                for (int i = 0; i < grow.Count; i++) target[i] = grow[i].NormalHeight;
+                RunGroupAnim(grow, target, true, group);
+                return;
+            }
+
+            List<TweakRow> rows = CollectGroupRows(group);
+            if (rows.Count == 0 || rows.Count > 40)
+            {
+                _collapsedGroups[group] = true;
+                BuildRows(true);
+                return;
+            }
+            int[] cur = new int[rows.Count];
+            for (int i = 0; i < rows.Count; i++) cur[i] = rows[i].Height;
+            _groupAnimBusy = true;
+            RunGroupAnim(rows, cur, false, group);
+        }
+
+        private List<TweakRow> CollectGroupRows(string group)
+        {
+            List<TweakRow> list = new List<TweakRow>();
+            for (int i = 0; i < _rows.Count; i++)
+            {
+                TweakRow r = _rows[i];
+                if (r != null && !r.IsDisposed && r.Tweak != null && r.Tweak.Group == group && r.Visible) list.Add(r);
+            }
+            return list;
+        }
+
+        /// <summary>分组高度动画：grow=true 由 1px 长到 sizes[i]；false 由 sizes[i] 收到 1px。</summary>
+        private void RunGroupAnim(List<TweakRow> rows, int[] sizes, bool grow, string group)
+        {
+            for (int i = 0; i < rows.Count; i++) rows[i].SuppressAutoHeight = true;
+
+            float pos = 0f;
+            Action tick = null;
+            tick = delegate
+            {
+                pos += 0.12f;
+                bool done = pos >= 1f;
+                if (done) pos = 1f;
+                float t = Theme.Ease.CubicOut(pos);
+                try
+                {
+                    for (int i = 0; i < rows.Count; i++)
+                    {
+                        TweakRow r = rows[i];
+                        if (r.IsDisposed) continue;
+                        int h = grow ? (int)(sizes[i] * t) : (int)(sizes[i] * (1 - t));
+                        if (h < 1) h = 1;
+                        if (r.Height != h) r.Height = h;
+                    }
+                    RefreshLayout();
+                }
+                catch
+                {
+                    done = true;
+                }
+                if (!done) return;
+
+                AnimationClock.Instance.Unsubscribe(tick);
+                _groupAnimBusy = false;
+                try
+                {
+                    if (grow)
+                    {
+                        for (int i = 0; i < rows.Count; i++)
+                        {
+                            if (rows[i].IsDisposed) continue;
+                            rows[i].SuppressAutoHeight = false;
+                            rows[i].Height = sizes[i];
+                        }
+                        RefreshLayout();
+                        Post(delegate { CascadeVisibleRows(); });
+                    }
+                    else
+                    {
+                        // 收拢完成：真正折叠并重建（行这才消失、分组计数更新）
+                        _collapsedGroups[group] = true;
+                        BuildRows(true);   // 折叠收尾后立即重建，避免与分片交叉导致状态不一致
+                    }
+                }
+                catch
+                {
+                }
+            };
+            AnimationClock.Instance.Subscribe(tick);
         }
 
         private void Relayout()
@@ -1050,16 +836,10 @@ namespace GuyueBox.UI.Views
                     ApplyCategory(hit);
                 }
                 PendingGroup = null;
-                // 分组变了必须重载数据：清空现有列表触发立即重建 + 后台探测
-                if (_loaded)
-                {
-                    _loaded = false;
-                    _tweaks.Clear();
-                    _states.Clear();
-                    ClearRows();
-                }
             }
+            // 主页面/固定页行只构建一次：首次进入 Load 建全部行；之后回到前台按当前分类重算可见性
             if (!_loaded) Load(false);
+            else ApplyFilters();
         }
 
         public override void OnDeactivated()
@@ -1076,6 +856,9 @@ namespace GuyueBox.UI.Views
         // --------------------------------------------------------------
 
         private int _loadGen;
+        private int _sortMode;
+        private AccentButton _sortButton;
+        private static readonly string[] SortNames = new string[] { "推荐优先", "风险靠后", "名称" };
 
         private void Load(bool force)
         {
@@ -1092,11 +875,14 @@ namespace GuyueBox.UI.Views
             // 关键体验修复：立即渲染完整列表（状态先用「未启用」占位），
             // 后台探测完成后逐行回填真实状态——点进去马上能看到全部优化项，
             // 不再是几秒空白、要切走切回才出现。
-            if (_tweaks.Count == 0)
+            // 主页面一次构建全部分组行（切分类/状态只切可见性，不再同步建 384 行卡顿）；
+            // 固定分组页仍只构建本组；force（刷新按钮）强制重建。
+            if (_tweaks.Count == 0 || force)
             {
-                List<ITweak> all = FilterByGroups(TweakLibrary.All());
+                List<ITweak> all = _fixedGroup ? FilterByGroups(TweakLibrary.All()) : TweakLibrary.All();
                 _tweaks.Clear();
                 _tweaks.AddRange(all);
+                SortTweaks();
                 _states.Clear();
                 for (int i = 0; i < _tweaks.Count; i++) _states[_tweaks[i].Id] = false;
                 BuildRows();
@@ -1111,15 +897,21 @@ namespace GuyueBox.UI.Views
                 try
                 {
                     all = FilterByGroups(TweakLibrary.All());
-                    // 并行探测：171 项的注册表读在多核上同时进行，等待时间缩短数倍
+                    // 分批并行探测：全部项同时读注册表会引发 I/O 风暴导致界面卡顿，
+                    // 改为每批 16 项并行，批间不等待——总时间相近但峰值 I/O 大幅降低
                     object sync = new object();
-                    System.Threading.Tasks.Parallel.For(0, all.Count, delegate(int i)
+                    int batchSize = 16;
+                    for (int batchStart = 0; batchStart < all.Count; batchStart += batchSize)
                     {
-                        bool applied = false;
-                        try { applied = all[i].IsApplied(); }
-                        catch { }
-                        lock (sync) { states[all[i].Id] = applied; }
-                    });
+                        int end = Math.Min(batchStart + batchSize, all.Count);
+                        System.Threading.Tasks.Parallel.For(batchStart, end, delegate(int i)
+                        {
+                            bool applied = false;
+                            try { applied = all[i].IsApplied(); }
+                            catch { }
+                            lock (sync) { states[all[i].Id] = applied; }
+                        });
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -1153,6 +945,57 @@ namespace GuyueBox.UI.Views
             });
         }
 
+        /// <summary>
+        /// 按当前排序模式重排 _tweaks：保持「分组聚集」（组间顺序沿用列表首次出现顺序，不打散大功能），
+        /// 仅组内排序。默认（推荐优先）：Recommended 在前、Risky 靠后、再按名称；风险靠后：Risky 靠后；名称：纯字母序。
+        /// </summary>
+        private void SortTweaks()
+        {
+            Dictionary<string, int> order = new Dictionary<string, int>();
+            int gi = 0;
+            for (int i = 0; i < _tweaks.Count; i++)
+            {
+                string g = _tweaks[i].Group;
+                if (!order.ContainsKey(g)) { order[g] = gi; gi++; }
+            }
+            _tweaks.Sort(delegate(ITweak a, ITweak b)
+            {
+                int g = order[a.Group].CompareTo(order[b.Group]);
+                if (g != 0) return g;
+                if (_sortMode == 0)
+                {
+                    int r = (b.Recommended ? 1 : 0).CompareTo(a.Recommended ? 1 : 0);
+                    if (r != 0) return r;
+                    int k = (a.Risky ? 1 : 0).CompareTo(b.Risky ? 1 : 0);
+                    if (k != 0) return k;
+                    return string.Compare(a.Name, b.Name, StringComparison.CurrentCultureIgnoreCase);
+                }
+                else if (_sortMode == 1)
+                {
+                    int k = (a.Risky ? 1 : 0).CompareTo(b.Risky ? 1 : 0);
+                    if (k != 0) return k;
+                    int r = (b.Recommended ? 1 : 0).CompareTo(a.Recommended ? 1 : 0);
+                    if (r != 0) return r;
+                    return string.Compare(a.Name, b.Name, StringComparison.CurrentCultureIgnoreCase);
+                }
+                return string.Compare(a.Name, b.Name, StringComparison.CurrentCultureIgnoreCase);
+            });
+        }
+
+        private void OnSortClick(object sender, EventArgs e)
+        {
+            _sortMode = (_sortMode + 1) % 3;
+            if (_sortButton != null) _sortButton.Text = "排序：" + SortNames[_sortMode];
+            SortTweaks();
+            BuildRows(true);   // 同步重建：复用已探测的 _states，不重新读注册表
+            for (int i = 0; i < _rows.Count; i++)
+            {
+                bool ap;
+                if (_states.TryGetValue(_rows[i].Tweak.Id, out ap)) _rows[i].SetState(ap);
+            }
+            UpdateSummary();
+        }
+
         private void ClearRows()
         {
             Body.SuspendLayout();
@@ -1171,71 +1014,147 @@ namespace GuyueBox.UI.Views
             Body.ResumeLayout(false);
         }
 
+        // ---------------- 分片构建（时间切片） ----------------
+        // 394 行控件在 UI 线程一次性创建会冻结界面约 0.5~1s（进页面、切分类后重建都走这条路）。
+        // 改为每帧最多建 BuildSliceRows 行：首屏行先出现，其余在后续帧补齐；
+        // 分片期间不重排（保持 SuspendRowLayout），只在全部建完后整体重排一次——
+        // 总耗时几乎不变，但单帧占用从"一整块"降为"一小片"，界面不再卡住。
+        private const int BuildSliceRows = 40;
+        private int _buildIndex;
+        private string _buildGroup;
+        private int _buildGroupCount;
+        private bool _buildCollapsed;
+        private GroupHeader _buildHeader;
+        private bool _building;
+
         private void BuildRows()
         {
+            BuildRows(false);
+        }
+
+        /// <summary>
+        /// 重建行列表。
+        /// synchronous = true：一次建完。折叠 / 展开动画必须走这条——它们紧接着要枚举刚建出的行
+        /// （分片会让它们拿到空集合，动画直接失效）。
+        /// synchronous = false：按帧分片，首次加载 / 刷新走这条，首屏行先出现、不长时间占用 UI 线程。
+        /// </summary>
+        private void BuildRows(bool synchronous)
+        {
+            if (_building) FinishBuildRows();   // 上一轮分片先收尾（保证控件树一致，不半途重来）
+
             Body.SuspendLayout();
             ClearRows();
             // 批量挂载：抑制每行触发的全表重排（否则 N 行 = O(N²) 卡顿）
             SuspendRowLayout();
-            try
+
+            _buildIndex = 0;
+            _buildGroup = null;
+            _buildGroupCount = 0;
+            _buildCollapsed = false;
+            _buildHeader = null;
+            _building = true;
+
+            if (synchronous)
             {
-                BuildRowsInner();
+                while (_buildIndex < _tweaks.Count)
+                {
+                    BuildRowAt(_buildIndex);
+                    _buildIndex++;
+                }
+                FinishBuildRows();
+                return;
             }
-            finally
-            {
-                Body.ResumeLayout(false);
-                ResumeRowLayout();
-            }
+            BuildRowsSlice();
         }
 
-        private void BuildRowsInner()
+        /// <summary>构建一片（≤ BuildSliceRows 行）；未建完则排到下一帧继续。</summary>
+        private void BuildRowsSlice()
         {
-            // (由 BuildRows 包裹：Suspend → 挂载 → Resume 单次重排)
+            if (!_building) return;   // 已收尾或被 Dispose 打断
 
-            string currentGroup = null;
-            GroupHeader header = null;
-            bool collapsed = false;
-            int groupCount = 0;
-
-            for (int i = 0; i < _tweaks.Count; i++)
+            int built = 0;
+            while (_buildIndex < _tweaks.Count && built < BuildSliceRows)
             {
-                ITweak t = _tweaks[i];
-                if (t.Group != currentGroup)
-                {
-                    if (header != null) header.CountText = groupCount + " 项";
-                    currentGroup = t.Group;
-                    groupCount = 0;
-                    header = new GroupHeader(currentGroup, GroupColor(currentGroup));
-                    bool wasCollapsed;
-                    _collapsedGroups.TryGetValue(currentGroup, out wasCollapsed);
-                    header.Collapsed = wasCollapsed;
-                    GroupHeader thisHeader = header; // 闭包按组固定，避免共享变量
-                    header.CollapsedChanged += delegate
-                    {
-                        _collapsedGroups[thisHeader.Text] = thisHeader.Collapsed;
-                        BuildRows();
-                    };
-                    Body.Controls.Add(header);
-                    collapsed = wasCollapsed;
-                }
-
-                groupCount++;
-                if (collapsed) continue; // 折叠：只计数量，不建行
-
-                TweakRow row = new TweakRow(t, this);
-                bool applied = false;
-                _states.TryGetValue(t.Id, out applied);
-                row.SetState(applied);
-                _rows.Add(row);
-                Body.Controls.Add(row);
+                BuildRowAt(_buildIndex);
+                _buildIndex++;
+                built++;
             }
 
-            if (header != null) header.CountText = groupCount + " 项";
+            if (_buildIndex < _tweaks.Count)
+            {
+                if (IsHandleCreated && !IsDisposed)
+                {
+                    // 还有剩余：排到下一帧继续（首屏行本次已建出）
+                    try { BeginInvoke((MethodInvoker)BuildRowsSlice); return; }
+                    catch { }
+                }
 
+                // 没有可用句柄或投递失败：必须在这里同步建完。
+                // 构造期 Load（启动即导航到本页）时窗口句柄尚未创建，BeginInvoke 无处投递，
+                // 若就此返回则 _building 永久挂起 —— 列表停在空状态，且 ApplyFilters 会一直让路。
+                while (_buildIndex < _tweaks.Count)
+                {
+                    BuildRowAt(_buildIndex);
+                    _buildIndex++;
+                }
+            }
+            FinishBuildRows();
+        }
+
+        /// <summary>分片收尾：组头计数、整体重排一次、应用筛选。</summary>
+        private void FinishBuildRows()
+        {
+            if (!_building) return;
+            _building = false;
+            if (_buildHeader != null) _buildHeader.CountText = _buildGroupCount + " 项";
+            _buildHeader = null;
+            Body.ResumeLayout(false);
+            ResumeRowLayout();
             ApplyFilters();
             RefreshLayout();
+        }
 
-            // 右栏默认收起（列表满宽）；点击任意优化项即滑动浮现详情，符合「宇奇」式交互。
+        /// <summary>
+        /// 构建单行（组头按需插入）。由 <see cref="BuildRowsSlice"/> 逐项调用，
+        /// 构建进度保存在 _build* 字段里跨帧延续（原来是一个 for 循环一次建完）。
+        /// </summary>
+        private void BuildRowAt(int index)
+        {
+            ITweak t = _tweaks[index];
+            if (t.Group != _buildGroup)
+            {
+                if (_buildHeader != null) _buildHeader.CountText = _buildGroupCount + " 项";
+                _buildGroup = t.Group;
+                _buildGroupCount = 0;
+                _buildHeader = new GroupHeader(_buildGroup, GroupColor(_buildGroup));
+                bool wasCollapsed;
+                _collapsedGroups.TryGetValue(_buildGroup, out wasCollapsed);
+                _buildHeader.Collapsed = wasCollapsed;
+                GroupHeader thisHeader = _buildHeader; // 闭包按组固定，避免共享变量
+                _buildHeader.CollapsedChanged += delegate
+                {
+                    // 折叠 / 展开走高度动画：内容逐行收拢或展开，而不是瞬间切换
+                    AnimateGroupToggle(thisHeader.Text, thisHeader.Collapsed);
+                };
+                Body.Controls.Add(_buildHeader);
+                _buildCollapsed = wasCollapsed;
+            }
+
+            _buildGroupCount++;
+            if (_buildCollapsed) return; // 折叠：只计数量，不建行
+
+            TweakRow row = new TweakRow(t, this);
+            if (_expandAnimGroup != null && t.Group == _expandAnimGroup)
+            {
+                // 展开动画：新行以 1px 起始高度建出，随后由动画长回正常高度
+                row.SuppressAutoHeight = true;
+                row.Height = 1;
+            }
+            bool applied = false;
+            _states.TryGetValue(t.Id, out applied);
+            row.SetState(applied);
+            _rows.Add(row);
+            Body.Controls.Add(row);
         }
 
         /// <summary>
@@ -1245,10 +1164,15 @@ namespace GuyueBox.UI.Views
         /// </summary>
         private void ApplyFilters()
         {
+            // 分片构建进行中：Body 还处于 Suspend、_rows 也不完整。此处若继续，
+            // 收尾的 ResumeRowLayout 会提前解除抑制 → 之后每挂一行都触发全表重排（O(N²) 回归）。
+            // 构建收尾（FinishBuildRows）会统一调用一次，这里直接让路。
+            if (_building) return;
             if (_rows.Count == 0 && Body.Controls.Count == 0) return;
 
             Dictionary<string, int> visibleCount = new Dictionary<string, int>();
             Body.SuspendLayout();
+            SuspendRowLayout(); // 筛选只切可见性：抑制每行 VisibleChanged 钩子触发的全量重排，否则退化成 O(n²)
             try
             {
                 for (int i = 0; i < _rows.Count; i++)
@@ -1264,19 +1188,36 @@ namespace GuyueBox.UI.Views
                     }
                 }
 
+                // 每个分组在当前筛选下还剩多少项。
+                // 折叠组没有行（visibleCount 里查不到），必须单独统计：否则搜索/筛选后
+                // 已经没有匹配项的分组，标题仍会留在列表里，点开是空的
+                //（用户感知为"优化项被自动收起来了"）。
+                Dictionary<string, int> matched = new Dictionary<string, int>();
+                for (int i = 0; i < _tweaks.Count; i++)
+                {
+                    ITweak t = _tweaks[i];
+                    if (!PassFilter(t)) continue;
+                    int m;
+                    matched[t.Group] = matched.TryGetValue(t.Group, out m) ? m + 1 : 1;
+                }
+
                 for (int i = 0; i < Body.Controls.Count; i++)
                 {
                     GroupHeader h = Body.Controls[i] as GroupHeader;
                     if (h == null) continue;
                     int n;
                     bool any = visibleCount.TryGetValue(h.Text, out n) && n > 0;
-                    // 折叠的组永远显示（它是展开入口，行本身未创建）
-                    h.Visible = any || h.Collapsed;
+                    int m2;
+                    bool hasMatched = matched.TryGetValue(h.Text, out m2) && m2 > 0;
+                    // 折叠组：展开后确实还有匹配项才保留标题，并显示筛选后的项数
+                    h.Visible = any || (h.Collapsed && hasMatched);
                     if (any) h.CountText = n + " 项";
+                    else if (h.Collapsed && hasMatched) h.CountText = m2 + " 项";
                 }
             }
             finally
             {
+                ResumeRowLayout(); // 解抑制并做一次整体重排（替代逐行触发）
                 Body.ResumeLayout(false);
             }
             RefreshLayout();
@@ -1285,6 +1226,9 @@ namespace GuyueBox.UI.Views
         /// <summary>状态筛选判定（"只看已启用"等）+ 关键词搜索。</summary>
         private bool PassFilter(ITweak t)
         {
+            // 硬件/系统不适用项：默认隐藏（可用工具栏「显示不适用项」开关查看；此类项应用会被拒绝）
+            if (!_showInapplicable && !TweakApplicability.IsApplicable(t)) return false;
+
             // 关键词：名称 / 说明 / 标识 / 分组 任一命中即保留（不区分大小写）
             if (_keyword.Length > 0)
             {
@@ -1308,6 +1252,8 @@ namespace GuyueBox.UI.Views
             }
             else if (_stateFilter == "rec" && !t.Recommended) return false;
             else if (_stateFilter == "risky" && !t.Risky) return false;
+            // 分类筛选：主页面行已全建，仅按当前分类切可见性（不重建）
+            if (_extraGroups != null && Array.IndexOf(_extraGroups, t.Group) < 0) return false;
             return true;
         }
 
@@ -1396,6 +1342,14 @@ namespace GuyueBox.UI.Views
             ITweak t = row.Tweak;
             bool applied = row.IsApplied;
 
+            // 本机不适用项：即便被「显示不适用项」开关显出，应用也会被拒绝——点开关即提示，不静默失败
+            if (!TweakApplicability.IsApplicable(t))
+            {
+                Dialog.Info(this, "不适用", "本机硬件/系统不满足「" + t.Name + "」的生效条件，该项不适用，应用会被拒绝。");
+                row.SetState(false);
+                return;
+            }
+
             if (!applied && t.AdminOnly && !Native.IsElevated())
             {
                 bool go = Dialog.Confirm(this, "需要管理员权限",
@@ -1468,7 +1422,7 @@ namespace GuyueBox.UI.Views
                     }
 
                     bool applyOk = false;
-                    try { applyOk = t.Apply(); } catch { }
+                    try { applyOk = TweakExecutor.Apply(t).IsOk; } catch { }
                     Post(delegate
                     {
                         _busy = false;
@@ -1513,7 +1467,7 @@ namespace GuyueBox.UI.Views
             System.Threading.ThreadPool.QueueUserWorkItem(delegate
             {
                 bool ok = false;
-                try { ok = wasApplied ? tw.Revert() : tw.Apply(); }
+                try { ok = wasApplied ? TweakExecutor.Revert(tw).IsOk : TweakExecutor.Apply(tw).IsOk; }
                 catch { ok = false; }
                 Post(delegate
                 {
@@ -1535,555 +1489,6 @@ namespace GuyueBox.UI.Views
                 });
             });
         }
-
-        // ---------- 内置方案库 ----------
-
-        private const string ProfilesRoot = @"Software\GuyueBox\Profiles";
-
-        private static string[] ListProfiles()
-        {
-            try
-            {
-                using (Microsoft.Win32.RegistryKey k = Microsoft.Win32.Registry.CurrentUser
-                    .OpenSubKey(ProfilesRoot))
-                {
-                    if (k == null) return new string[0];
-                    return k.GetSubKeyNames();
-                }
-            }
-            catch { return new string[0]; }
-        }
-
-        private static string ReadProfile(string name)
-        {
-            try
-            {
-                return Microsoft.Win32.Registry.GetValue(
-                    @"HKEY_CURRENT_USER\" + ProfilesRoot + "\\" + name, "ids", "") as string ?? "";
-            }
-            catch { return ""; }
-        }
-
-        private void OnSaveProfileClick(object sender, EventArgs e)
-        {
-            if (_groupFilter != null)
-            {
-                SetSubtitle("当前只显示「" + _groupFilter + "」分类——请先切回「全部」再保存方案，否则方案不完整。", Theme.Warning);
-                return;
-            }
-            List<string> ids = new List<string>();
-            for (int i = 0; i < _rows.Count; i++)
-            {
-                if (_rows[i].IsApplied) ids.Add(_rows[i].Tweak.Id);
-            }
-            if (ids.Count == 0)
-            {
-                Dialog.Info(this, "空方案", "当前没有任何已启用的优化项，没有可保存的内容。");
-                return;
-            }
-            string name = Dialog.Input(this, "保存方案", "方案名称（如：游戏模式 / 日常）：", "");
-            if (name == null || name.Trim().Length == 0) return;
-            name = name.Trim();
-            if (name.IndexOf('\\') >= 0 || name.IndexOf('/') >= 0) name = name.Replace('\\', '_').Replace('/', '_');
-
-            Microsoft.Win32.Registry.SetValue(
-                @"HKEY_CURRENT_USER\" + ProfilesRoot + "\\" + name, "ids",
-                string.Join(",", ids.ToArray()));
-            Microsoft.Win32.Registry.SetValue(
-                @"HKEY_CURRENT_USER\" + ProfilesRoot + "\\" + name, "saved",
-                DateTime.Now.ToString("yyyy-MM-dd HH:mm"));
-            BuildProfileChips();
-            SetSubtitle("方案「" + name + "」已保存（" + ids.Count + " 项）。点击方案名即可一键切换。", Theme.Success);
-        }
-
-        private void ApplyProfile(string name)
-        {
-            if (_busy) return;
-            if (_groupFilter != null)
-            {
-                SetSubtitle("当前只显示「" + _groupFilter + "」分类——请先切回「全部」再应用方案，否则其余分类不会被同步。", Theme.Warning);
-                return;
-            }
-            string raw = ReadProfile(name);
-            if (raw.Length == 0)
-            {
-                Dialog.Info(this, "空方案", "方案「" + name + "」没有记录任何优化项。");
-                return;
-            }
-            Dictionary<string, bool> want = new Dictionary<string, bool>();
-            foreach (string id in raw.Split(','))
-            {
-                if (id.Trim().Length > 0) want[id.Trim()] = true;
-            }
-
-            List<TweakRow> toApply = new List<TweakRow>();
-            List<TweakRow> toRevert = new List<TweakRow>();
-            for (int i = 0; i < _rows.Count; i++)
-            {
-                TweakRow row = _rows[i];
-                bool inProfile;
-                if (!want.TryGetValue(row.Tweak.Id, out inProfile))
-                {
-                    if (row.IsApplied) toRevert.Add(row);
-                    continue;
-                }
-                if (!row.IsApplied) toApply.Add(row);
-            }
-
-            if (toApply.Count == 0 && toRevert.Count == 0)
-            {
-                SetSubtitle("当前状态与方案「" + name + "」一致。", Theme.TextSecondary);
-                return;
-            }
-            if (!Dialog.Confirm(this, "应用方案",
-                "将同步到方案「" + name + "」：\r\n\r\n  · 启用 " + toApply.Count + " 项\r\n  · 还原 " + toRevert.Count + " 项\r\n\r\n继续吗？"))
-            {
-                return;
-            }
-
-            List<TweakRow> all = new List<TweakRow>();
-            all.AddRange(toApply);
-            all.AddRange(toRevert);
-            ImportRun(all, toApply.Count, toRevert.Count);
-        }
-
-        private void DeleteProfile(string name)
-        {
-            try
-            {
-                Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(ProfilesRoot + "\\" + name, false);
-            }
-            catch { }
-            BuildProfileChips();
-            SetSubtitle("方案「" + name + "」已删除。", Theme.TextSecondary);
-        }
-
-        /// <summary>重建方案 chips（有方案才显示整行区域）。左键应用，右键删除。</summary>
-        private void BuildProfileChips()
-        {
-            _profileChips.FlowDirection = FlowDirection.LeftToRight;
-            _profileChips.WrapContents = false;
-            _profileChips.BackColor = Theme.WindowBg;
-            _profileChips.Height = 28;
-            _profileChips.AutoSize = true; // 宽度随内容自适应，避免提示文字被默认 200px 宽度裁剪
-            _profileChips.Controls.Clear();
-
-            string[] names = ListProfiles();
-            if (names.Length == 0)
-            {
-                Label empty = new Label();
-                empty.Text = "暂无保存的方案——先按需要开好优化，再点「＋保存方案」";
-                empty.ForeColor = Theme.TextMuted;
-                empty.Font = Theme.FontSmall;
-                empty.AutoSize = true;
-                empty.Margin = new Padding(0, 6, 0, 0);
-                _profileChips.Controls.Add(empty);
-                return;
-            }
-
-            Label cap = new Label();
-            cap.Text = "我的方案:";
-            cap.ForeColor = Theme.TextMuted;
-            cap.Font = Theme.FontSmall;
-            cap.AutoSize = true;
-            cap.Margin = new Padding(16, 6, 8, 0);
-            _profileChips.Controls.Add(cap);
-
-            foreach (string name in names)
-            {
-                string captured = name;
-                AccentButton chip = new AccentButton();
-                chip.Text = captured;
-                chip.Variant = ButtonVariant.Ghost;
-                chip.Height = 28;
-                chip.FitToText(72);
-                chip.Margin = new Padding(0, 0, 8, 0);
-                chip.Click += delegate { ApplyProfile(captured); };
-                chip.MouseUp += delegate (object s, MouseEventArgs me)
-                {
-                    if (me.Button == MouseButtons.Right &&
-                        Dialog.Confirm(this, "删除方案", "删除方案「" + captured + "」吗？"))
-                    {
-                        DeleteProfile(captured);
-                    }
-                };
-                _profileChips.Controls.Add(chip);
-            }
-        }
-
-        // ---------- 优化方案导出 / 导入 ----------
-
-        /// <summary>把当前所有「已启用」的优化项 Id 快照保存为方案文件。</summary>
-        private void OnExportProfile(object sender, EventArgs e)
-        {
-            List<string> ids = new List<string>();
-            for (int i = 0; i < _rows.Count; i++)
-            {
-                if (_rows[i].IsApplied) ids.Add(_rows[i].Tweak.Id);
-            }
-            if (ids.Count == 0)
-            {
-                Dialog.Info(this, "空方案", "当前没有任何已启用的优化项，没有可保存的内容。");
-                return;
-            }
-
-            using (SaveFileDialog d = new SaveFileDialog())
-            {
-                d.Filter = "优化方案 (*.stprofile)|*.stprofile";
-                d.FileName = "我的优化方案.stprofile";
-                if (d.ShowDialog(this) != DialogResult.OK) return;
-
-                StringBuilder sb = new StringBuilder();
-                sb.Append("{\"app\":\"GuyueBox\",\"version\":1,\"saved\":\"");
-                sb.Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm"));
-                sb.Append("\",\"ids\":[");
-                for (int i = 0; i < ids.Count; i++)
-                {
-                    if (i > 0) sb.Append(',');
-                    sb.Append('"').Append(ids[i]).Append('"');
-                }
-                sb.Append("]}");
-                try
-                {
-                    System.IO.File.WriteAllText(d.FileName, sb.ToString(),
-                        new System.Text.UTF8Encoding(false));
-                    SetSubtitle("方案已保存（" + ids.Count + " 项）：" + d.FileName, Theme.Success);
-                }
-                catch (Exception ex)
-                {
-                    Dialog.Error(this, "保存失败", ex.Message);
-                }
-            }
-        }
-
-        /// <summary>读取方案文件，把优化中心同步到方案记录的状态（应用缺失的、还原多余的）。</summary>
-        private void OnImportProfile(object sender, EventArgs e)
-        {
-            if (_busy) return;
-
-            string file;
-            using (OpenFileDialog d = new OpenFileDialog())
-            {
-                d.Filter = "优化方案 (*.stprofile)|*.stprofile";
-                if (d.ShowDialog(this) != DialogResult.OK) return;
-                file = d.FileName;
-            }
-
-            string[] ids;
-            try
-            {
-                string json = System.IO.File.ReadAllText(file);
-                System.Text.RegularExpressions.Match m = System.Text.RegularExpressions.Regex.Match(
-                    json, "\"ids\"\\s*:\\s*\\[(.*?)\\]", System.Text.RegularExpressions.RegexOptions.Singleline);
-                if (!m.Success)
-                {
-                    Dialog.Error(this, "文件无效", "不是本工具导出的优化方案文件。");
-                    return;
-                }
-                List<string> list = new List<string>();
-                foreach (System.Text.RegularExpressions.Match s in
-                    System.Text.RegularExpressions.Regex.Matches(m.Groups[1].Value, "\"([a-z0-9_]+)\""))
-                {
-                    list.Add(s.Groups[1].Value);
-                }
-                ids = list.ToArray();
-            }
-            catch (Exception ex)
-            {
-                Dialog.Error(this, "读取失败", ex.Message);
-                return;
-            }
-
-            // 与当前状态求差
-            Dictionary<string, bool> want = new Dictionary<string, bool>();
-            foreach (string id in ids) want[id] = true;
-
-            List<TweakRow> toApply = new List<TweakRow>();
-            List<TweakRow> toRevert = new List<TweakRow>();
-            int unknown = 0;
-            for (int i = 0; i < _rows.Count; i++)
-            {
-                TweakRow row = _rows[i];
-                bool inProfile;
-                if (!want.TryGetValue(row.Tweak.Id, out inProfile))
-                {
-                    if (!row.IsApplied) continue; // 未启用且不在方案里：无需动
-                    // 方案里没有但当前已启用 → 还原
-                    toRevert.Add(row);
-                    continue;
-                }
-                if (row.IsApplied) continue; // 已与方案一致
-                toApply.Add(row);
-            }
-            // 统计方案中本库不存在的项
-            Dictionary<string, bool> known = new Dictionary<string, bool>();
-            for (int i = 0; i < _rows.Count; i++) known[_rows[i].Tweak.Id] = true;
-            foreach (string id in ids)
-            {
-                if (!known.ContainsKey(id)) unknown++;
-            }
-
-            if (toApply.Count == 0 && toRevert.Count == 0)
-            {
-                SetSubtitle("当前状态与方案一致，无需变更" + (unknown > 0 ? "（方案中 " + unknown + " 项在本库不存在，已跳过）" : "") + "。",
-                    Theme.TextSecondary);
-                return;
-            }
-
-            string msg = "将把优化中心同步到该方案：\r\n\r\n  · 启用 " + toApply.Count + " 项\r\n  · 还原 " + toRevert.Count + " 项" +
-                (unknown > 0 ? "\r\n\r\n注意：方案中 " + unknown + " 项在本库不存在，将跳过。" : "") +
-                "\r\n\r\n继续执行吗？";
-            if (!Dialog.Confirm(this, "导入方案", msg)) return;
-
-            List<TweakRow> all = new List<TweakRow>();
-            all.AddRange(toApply);
-            all.AddRange(toRevert);
-            ImportRun(all, toApply.Count, toRevert.Count);
-        }
-
-        /// <summary>后台线程逐项执行方案同步。</summary>
-        private void ImportRun(List<TweakRow> rows, int applyCount, int revertCount)
-        {
-            _busy = true;
-            _loadGen++;              // 会话令牌：批量期间用户切分类/强制刷新，本批次的 UI 回调整体作废
-            int gen = _loadGen;
-
-            // 高危闸门（与单项开关一致）：批次含「谨慎项启用」时先确认/创建还原点
-            bool hasRiskyApply = false;
-            for (int i = 0; i < rows.Count; i++)
-            {
-                if (rows[i].Tweak.Risky && wantApply(rows, rows[i], applyCount))
-                {
-                    hasRiskyApply = true;
-                    break;
-                }
-            }
-            if (hasRiskyApply)
-            {
-                SetSubtitle("批次含谨慎项，正在确认系统还原点…", Theme.Warning);
-                System.Threading.ThreadPool.QueueUserWorkItem(delegate
-                {
-                    bool rpOk;
-                    string note = EnsureRecentRestorePoint("GuyueBox - 方案同步前", out rpOk);
-                    try
-                    {
-                        BeginInvoke((MethodInvoker)delegate
-                        {
-                            if (gen != _loadGen || IsDisposed || Disposing) return;
-                            if (!rpOk)
-                            {
-                                // #22：Risky 项的还原点必须确认创建成功，失败即取消整批应用
-                                SetSubtitle("还原点创建失败，已取消本次方案同步：" + note, Theme.Danger);
-                                Dialog.Warn(this, "还原点创建失败",
-                                    "谨慎项应用前必须确保有系统还原点兜底，但创建失败了：\r\n" + note +
-                                    "\r\n\r\n本次同步已取消。请检查系统保护是否开启（系统属性 → 系统保护）后重试。");
-                                return;
-                            }
-                            SetSubtitle(note.Length > 0 ? note + "，开始同步方案…" : "开始同步方案…", Theme.Warning);
-                            ImportRunCore(rows, applyCount, revertCount, gen);
-                        });
-                    }
-                    catch { }
-                });
-                return;
-            }
-            ImportRunCore(rows, applyCount, revertCount, gen);
-        }
-
-        /// <summary>24 小时内已有还原点则跳过，否则创建一个。
-        /// 返回给用户看的备注；ok=false 表示还原点创建失败（Risky 项应用必须就此取消——#22 校验要求）。</summary>
-        private static string EnsureRecentRestorePoint(string title, out bool ok)
-        {
-            try
-            {
-                List<RestorePoint> points = RestorePoints.List();
-                for (int i = 0; i < points.Count; i++)
-                {
-                    if ((DateTime.Now - points[i].Created).TotalHours < 24) { ok = true; return ""; }
-                }
-            }
-            catch { }
-            string err;
-            bool created = RestorePoints.Create(title, out err);
-            if (created) { ok = true; return "已创建系统还原点"; }
-            ok = false;
-            return string.IsNullOrEmpty(err) ? "还原点创建失败" : err;
-        }
-
-        private void ImportRunCore(List<TweakRow> rows, int applyCount, int revertCount, int gen)
-        {
-            SetSubtitle("正在同步方案（0/" + rows.Count + "）…", Theme.Warning);
-            System.Threading.ThreadPool.QueueUserWorkItem(delegate
-            {
-                int done = 0, failed = 0;
-                for (int i = 0; i < rows.Count; i++)
-                {
-                    TweakRow row = rows[i];
-                    bool target = wantApply(rows, row, applyCount);
-                    try
-                    {
-                        bool ok = target ? row.Tweak.Apply() : row.Tweak.Revert();
-                        if (!ok) failed++;
-                    }
-                    catch
-                    {
-                        failed++;
-                    }
-                    done++;
-                    try
-                    {
-                        BeginInvoke((MethodInvoker)delegate
-                        {
-                            if (gen != _loadGen) return; // 界面已重建，不再触碰旧行
-                            if (row.IsDisposed) return;
-                            row.SetState(row.Tweak.IsApplied());
-                            _states[row.Tweak.Id] = row.Tweak.IsApplied();
-                            SetSubtitle("正在同步方案（" + done + "/" + rows.Count + "）…", Theme.Warning);
-                        });
-                    }
-                    catch
-                    {
-                    }
-                }
-                try
-                {
-                    BeginInvoke((MethodInvoker)delegate
-                    {
-                        if (gen != _loadGen) return; // 界面已重建：状态以新会话的探测为准
-                        _busy = false;
-                        UpdateSummary();
-                        SetSubtitle("方案同步完成：启用 " + applyCount + "、还原 " + revertCount +
-                            (failed > 0 ? "，" + failed + " 项失败（详见状态列）" : "，全部成功") + "。",
-                            failed > 0 ? Theme.Warning : Theme.Success);
-                    });
-                }
-                catch
-                {
-                }
-            });
-        }
-
-        private static bool wantApply(List<TweakRow> rows, TweakRow row, int applyCount)
-        {
-            // ImportRun 的 rows 前 applyCount 个是待应用，其余是待还原
-            return rows.IndexOf(row) < applyCount;
-        }
-
-        private void OnRecommendedClick(object sender, EventArgs e)
-        {
-            if (_busy) return;
-
-            // 单一数据源：与「推荐」筛选一致，直接以 ITweak.Recommended 为准
-            List<ITweak> targets = new List<ITweak>();
-            for (int i = 0; i < _tweaks.Count; i++)
-            {
-                bool applied;
-                if (!_states.TryGetValue(_tweaks[i].Id, out applied)) applied = false;
-                if (applied) continue;
-                if (_tweaks[i].Recommended) targets.Add(_tweaks[i]);
-            }
-
-            if (targets.Count == 0)
-            {
-                Dialog.Info(this, "无需优化", "推荐项目都已经处于启用状态。");
-                return;
-            }
-
-            string list = "";
-            for (int i = 0; i < targets.Count; i++) list += "· " + targets[i].Name + "\r\n";
-
-            if (!Dialog.Confirm(this, "一键推荐优化",
-                "将启用以下 " + targets.Count + " 项推荐优化：\r\n\r\n" + list +
-                "\r\n所有改动都会被备份，可随时单独还原。是否继续？"))
-                return;
-
-            int okCount = 0;
-            int failCount = 0;
-            int adminNeeded = 0;
-
-            for (int i = 0; i < targets.Count; i++)
-            {
-                ITweak t = targets[i];
-                if (t.AdminOnly && !Native.IsElevated())
-                {
-                    adminNeeded++;
-                    failCount++;
-                    continue;
-                }
-                if (t.Apply())
-                {
-                    okCount++;
-                    _states[t.Id] = true;
-                }
-                else
-                {
-                    failCount++;
-                }
-            }
-
-            SyncRows();
-            UpdateSummary();
-
-            string text = "成功启用 " + okCount + " 项优化。";
-            if (failCount > 0) text += "\r\n有 " + failCount + " 项未能应用。";
-            if (adminNeeded > 0)
-            {
-                text += "\r\n\r\n其中 " + adminNeeded + " 项需要管理员权限，请以管理员身份重新运行后再试。";
-            }
-            text += "\r\n\r\n部分设置需要重启或重新登录后才会生效。";
-
-            SetSubtitle("一键优化完成：" + okCount + " 项成功。", failCount > 0 ? Theme.Warning : Theme.Success);
-            Dialog.Success(this, "一键优化", text);
-        }
-
-        private void OnRestoreAllClick(object sender, EventArgs e)
-        {
-            if (_busy) return;
-
-            List<ITweak> appliedList = new List<ITweak>();
-            for (int i = 0; i < _tweaks.Count; i++)
-            {
-                bool a = false;
-                _states.TryGetValue(_tweaks[i].Id, out a);
-                if (a) appliedList.Add(_tweaks[i]);
-            }
-
-            if (appliedList.Count == 0)
-            {
-                Dialog.Info(this, "无需还原", "当前没有已启用的优化项。");
-                return;
-            }
-
-            if (!Dialog.Confirm(this, "全部还原",
-                "将把 " + appliedList.Count + " 项优化全部还原为原状态。\r\n\r\n" +
-                "还原依据的是启用时自动保存的备份，因此可以准确恢复。是否继续？"))
-                return;
-
-            int okCount = 0;
-            int failCount = 0;
-            for (int i = 0; i < appliedList.Count; i++)
-            {
-                if (appliedList[i].Revert())
-                {
-                    okCount++;
-                    _states[appliedList[i].Id] = false;
-                }
-                else
-                {
-                    failCount++;
-                }
-            }
-
-            SyncRows();
-            UpdateSummary();
-
-            SetSubtitle("已还原 " + okCount + " 项。", failCount > 0 ? Theme.Warning : Theme.Success);
-            Dialog.Success(this, "还原完成",
-                "成功还原 " + okCount + " 项。" +
-                (failCount > 0 ? "\r\n" + failCount + " 项没有备份记录，已保持当前状态。" : "") +
-                "\r\n\r\n部分设置需要重启后生效。");
-        }
-
         private void SyncRows()
         {
             for (int i = 0; i < _rows.Count; i++)
@@ -2092,5 +1497,6 @@ namespace GuyueBox.UI.Views
                 _states.TryGetValue(_rows[i].Tweak.Id, out a);
                 _rows[i].SetState(a);
             }
-        }    }
+        }
+    }
 }

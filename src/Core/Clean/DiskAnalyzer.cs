@@ -1,4 +1,9 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：磁盘占用分析：递归统计目录/文件体积，定位空间被谁占了
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;

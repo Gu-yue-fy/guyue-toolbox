@@ -1,4 +1,6 @@
-﻿using System;
+/* 文件说明：全局配色、字体与绘制工具（Gfx）——深空灰磨砂 + 克制精密。 */
+
+using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -6,24 +8,12 @@ using System.Windows.Forms;
 namespace GuyueBox.UI
 {
     /// <summary>
-    /// 全局配色与字体。支持深色 / 浅色两套方案，主题色可切换。
-    /// 所有颜色字段均为可变静态量，统一由 <see cref="ApplyScheme"/> 赋值；
-    /// 界面各处只引用 Theme.*，因此新增配色方案无需改动任何控件代码。
-    ///
-    /// ── 全工程设计纪律（改界面前先读这一节；每条都对应一次真实缺陷）──
-    /// 1. 颜色语义固定，不做装饰：蓝=主操作、绿=成功/安全、琥珀=建议或"可撤销的破坏性动作"、
-    ///    红=危险/不可撤销、紫=仅用于上传类语义。红色不可滥用，否则失去警示力。
-    /// 2. 半透明色不能当实色用：玻璃色是"白 + 低 alpha"，直接把 alpha 改成不透明会得到纯白底
-    ///    （曾造成主题色块全白、切浅色后白底白字、Toast 白底白字）。跨控件绘制要自己合成实色。
-    /// 3. 破坏性操作必须有确认，且说清"后果 / 是否可撤销 / 影响范围"三件事；
-    ///    确认键写动作名（"开始粉碎"）而不是"确定"，并用 Dialog.ConfirmDanger。
-    /// 4. 不放假按钮：不能自动修的项（如驱动异常）只做说明，不做"点了也没用"的按钮。
-    /// 5. 长任务显示分阶段进度并尽量可取消；取消后保留已完成结果并说明下一步（不是"失败"）。
-    /// 6. 瞬时反馈用 Toast 浮层（不抢焦点、自动消失）；页头副标题只承担"当前状态"。
-    /// 7. 空状态三件套：说明原因 + 给出下一步入口，不留一屏死白（InfoList.EmptyActionText）。
-    /// 8. 行高必须在挂载前定稿：挂载后再改高会与其后区块错位（见 ViewBase.RefreshLayout 注释）。
-    /// 9. 悬停与动画只改颜色/位置，不在每帧路径上新建 GDI 对象（一律走 GdiCache）。
-    /// 10. 任何"看起来没用的字段"先核实再删：Win32 结构体字段、接口实现删了会崩。
+    /// 全局配色与字体。支持深色 / 浅色两套方案，主题色可切换；所有颜色统一由 ApplyScheme 赋值。
+    /// 工程纪律（每条对应一次真实缺陷）：
+    /// 1. 颜色语义固定：蓝=主操作、绿=成功/安全、琥珀=可撤销的破坏性动作、红=不可撤销/危险。
+    /// 2. 半透明色不能当实色用（玻璃色 = 白 + 低 alpha），跨控件绘制须自行合成实色。
+    /// 3. 破坏性操作必须用 Dialog.ConfirmDanger 说清后果 / 是否可撤销 / 影响范围三件事。
+    /// 4. 瞬时反馈走 Toast；空状态三件套；行高挂载前定稿；GDI 对象一律走 GdiCache。
     /// </summary>
     public static class Theme
     {
@@ -85,16 +75,25 @@ namespace GuyueBox.UI
         // ---------------- 设计令牌 ----------------
 
         /// <summary>菜单项 / 选中态圆角 8px。</summary>
-        public const int RadiusItem = 8;
+        public const int RadiusItem = 10;
 
         /// <summary>导航项圆角（设计 8）。</summary>
-        public const int RadiusNav = 8;
+        public const int RadiusNav = 10;
 
-        /// <summary>按钮圆角（设计 Token.Radius.Button = 4）。</summary>
-        public const int RadiusButton = 4;
+        /// <summary>
+        /// 按钮圆角。原为 4（设计 Token.Radius.Button），视觉上偏"方方正正"；
+        /// 按反馈调圆润到 8 —— 与导航项 / 菜单项同一圆角档，按钮高度 30~36px 时不会显得笨。
+        /// </summary>
+        public const int RadiusButton = 10;
 
         /// <summary>菜单项高度 36px（设计 Token.Size.ButtonHeight = 36 一致）。</summary>
         public const int ItemHeight = 36;
+
+        /// <summary>侧栏导航项高度 34px（行高紧凑但不局促；配合零边距让全部分组一屏可见）。</summary>
+        public const int NavItemHeight = 34;
+
+        /// <summary>侧栏分组标题高度 28px。</summary>
+        public const int NavGroupHeight = 28;
 
         /// <summary>选中态时长 240ms。</summary>
         public const int MotionActiveMs = 240;
@@ -117,6 +116,24 @@ namespace GuyueBox.UI
             public const int Number = 500;       // 数值滚动
             public const int LoopSpin = 1000;    // 环形加载旋转周期
             public const int LoopShimmer = 1500; // 骨架屏微光周期
+
+            // ---- 每帧进度步长（线性逼近 0→1，配合 AnimationClock 16ms 粒度）----
+            public const float CascStep = 0.13f;   // 页面元素级联入场
+            public const float RailStep = 0.16f;   // 优化项详情栏滑入/滑出
+
+            // ---- 指数插值系数（lerp factor，越小越柔、越大越快收敛）----
+            public const float ScoreLerp  = 0.22f;  // 健康卡得分滚动
+            public const float FadeLerp   = 0.30f;  // 加载遮罩淡入淡出
+            public const float GridLerp   = 0.35f;  // 数据网格平滑滚动
+            public const float ScrollLerp = 0.45f;  // 页面自绘滚动条平滑滚动
+
+            // ---- 平滑滚动收敛阈值（行索引/像素差低于此即吸附到目标，停止动画）----
+            public const double ScrollSnap = 0.06;  // 数据网格：行索引差阈值
+
+            // ---- 旋转角速度（度/帧，AnimationClock 16ms 粒度）----
+            public const float SpinDegPerFrame = 8f;    // 状态 Spinner（0.5°/ms）
+            public const float ScanDegPerFrame = 9f;    // 体检扫描环
+            public const float BreathStep      = 0.09f; // 加载遮罩呼吸相位
         }
 
         /// <summary>缓动函数：入参 t∈[0,1]，返回插值后的进度（均为标准曲线）。</summary>
@@ -177,23 +194,16 @@ namespace GuyueBox.UI
         /// <summary>开关关闭态滑块颜色。</summary>
         public static Color KnobOff;
 
-        /// <summary>侧栏选中态底色强度（%）：浅色方案需要更实的底色才看得清。</summary>
-        public static int SelFillPercent;
-
         /// <summary>卡片顶部 1px 高光（深色用白、浅色用极淡黑）。</summary>
         public static Color CardHighlight;
 
-        // ---------------- 设计设计语言扩展令牌 ----------------
-        // 取自 设计规范 的 DarkTheme.xaml / DesignTokens.xaml，保持语义命名一致。
+        // ---------------- 设计语言扩展令牌 ----------------
+        // 语义化设计令牌命名，保持全局一致。
 
-        /// <summary>外壳底色（设计 ShellBackground #050508）。</summary>
+        /// <summary>外壳底色。</summary>
         public static Color ShellBg;
 
-        /// <summary>应用背景渐变上下端（设计 AppBackground：#050508 → #0C1220）。</summary>
-        public static Color AppBgTop;
-        public static Color AppBgBottom;
-
-        /// <summary>侧栏背景渐变上下端（设计 SidebarBackground：#050A18 → #070E21）。</summary>
+        /// <summary>侧栏背景渐变上下端。</summary>
         public static Color SidebarBgTop;
         public static Color SidebarBgBottom;
 
@@ -207,9 +217,8 @@ namespace GuyueBox.UI
         public static Color NavSelTop;
         public static Color NavSelBottom;
 
-        /// <summary>导航选中描边渐变上下端（设计 NavItemSelectedBorder：#25FFFFFF → #10FFFFFF）。</summary>
+        /// <summary>导航选中描边上端（设计 NavItemSelectedBorder：#25FFFFFF）。</summary>
         public static Color NavSelBorderTop;
-        public static Color NavSelBorderBottom;
 
         /// <summary>导航选中态图标底（设计 NavItemSelectedIconBackground：#203B82F6）。</summary>
         public static Color NavSelIconBg;
@@ -236,10 +245,7 @@ namespace GuyueBox.UI
         /// <summary>侧栏右缘光带（设计：垂直渐变 透明 → #15FFFFFF → 透明）。</summary>
         public static Color LightBeam;
 
-        /// <summary>滚动轨底色（设计 Scrollbar.Track #2A3850）。</summary>
-        public static Color ScrollTrack;
-
-        /// <summary>表格行分隔线（设计 Theme.Row.Border #334155）。</summary>
+        /// <summary>表格行分隔线。</summary>
         public static Color RowBorder;
 
         /// <summary>强调色上的文字色（设计 TextOnAccent #0F172A 深墨，而非白色）。</summary>
@@ -248,22 +254,21 @@ namespace GuyueBox.UI
         /// <summary>可选主题色（索引对应设置页色块）。数组实例固定，切换方案时就地覆盖。</summary>
         public static readonly Color[] Palette = new Color[6];
 
-        // 主题色板：以设计的强调色 #3B82F6 为首，其余取自同一套语义色家族
-        // （Success #34D399 / Warning #FBBF24 / Error #F87171），保持"无彩虹"的克制感。
+        // 主题色板：蓝 #3B82F6 为首，青/紫/绿/琥珀/红取自同族语义色，克制无彩虹。
         private static readonly Color[] DarkPalette = new Color[]
         {
-            Color.FromArgb(59, 130, 246),   // 蓝 #3B82F6（默认，设计强调色）
-            Color.FromArgb(34, 211, 238),   // 青 #22D3EE
+            Color.FromArgb(59, 130, 246),   // 蓝 #3B82F6（默认强调色）
+            Color.FromArgb(90, 200, 250),   // 青 #5AC8FA
             Color.FromArgb(167, 139, 250),  // 紫 #A78BFA
-            Color.FromArgb(52, 211, 153),   // 绿 #34D399（设计 Success）
-            Color.FromArgb(251, 191, 36),   // 琥珀 #FBBF24（设计 Warning）
-            Color.FromArgb(248, 113, 113)   // 红 #F87171（设计 Error）
+            Color.FromArgb(52, 199, 89),    // 绿 #34C759
+            Color.FromArgb(255, 149, 0),    // 琥珀 #FF9500
+            Color.FromArgb(255, 59, 48)     // 红 #FF3B30
         };
 
         private static readonly Color[] LightPalette = new Color[]
         {
             Color.FromArgb(37, 99, 235),    // 蓝 #2563EB（默认）
-            Color.FromArgb(8, 145, 178),    // 青 #0891B2
+            Color.FromArgb(2, 132, 199),    // 青 #0284C7
             Color.FromArgb(124, 58, 237),   // 紫 #7C3AED
             Color.FromArgb(5, 150, 105),    // 绿 #059669
             Color.FromArgb(217, 119, 6),    // 琥珀 #D97706
@@ -283,56 +288,52 @@ namespace GuyueBox.UI
 
             if (_light)
             {
-                // ===== 设计浅色：同一套语义角色，暖白底 + 精密描边（保持设计语言一致）=====
-                ShellBg = Color.FromArgb(242, 244, 247);
-                AppBgTop = Color.FromArgb(255, 255, 255);
-                AppBgBottom = Color.FromArgb(238, 242, 247);
-                SidebarBgTop = Color.FromArgb(247, 249, 252);
-                SidebarBgBottom = Color.FromArgb(238, 242, 248);
+                // ===== 浅色：暖白底 + 精密描边（同一套语义角色）=====
+                ShellBg = Color.FromArgb(245, 246, 248);        // #F5F6F8
+                SidebarBgTop = Color.FromArgb(240, 241, 245);
+                SidebarBgBottom = Color.FromArgb(233, 234, 240);
 
                 ChromeBg = ShellBg;
                 SidebarBg = SidebarBgTop;
-                WindowBg = Color.FromArgb(245, 247, 250);
-                CardBg = Color.FromArgb(255, 255, 255);
-                CardBgAlt = Color.FromArgb(242, 245, 249);
-                CardHover = Color.FromArgb(233, 238, 245);
+                WindowBg = Color.FromArgb(237, 238, 243);
+                CardBg = Color.FromArgb(255, 255, 255);        // #FFFFFF
+                CardBgAlt = Color.FromArgb(244, 245, 249);
+                CardHover = Color.FromArgb(236, 238, 244);
 
-                BorderSoft = Color.FromArgb(230, 234, 240);
-                Border = Color.FromArgb(216, 222, 231);
-                BorderStrong = Color.FromArgb(185, 194, 207);
+                BorderSoft = Color.FromArgb(230, 232, 238);
+                Border = Color.FromArgb(215, 218, 226);
+                BorderStrong = Color.FromArgb(193, 197, 208);
 
-                TextPrimary = Color.FromArgb(15, 23, 42);     // #0F172A
-                TextSecondary = Color.FromArgb(71, 85, 105);  // #475569
-                TextMuted = Color.FromArgb(100, 116, 139);    // #64748B
+                TextPrimary = Color.FromArgb(23, 24, 28);      // #17181C
+                TextSecondary = Color.FromArgb(90, 93, 103);
+                // 浅色主题同理：原 #8B8E98 在白底上偏淡，压深到 #6E7280
+                TextMuted = Color.FromArgb(110, 114, 128);   // #6E7280
 
-                Success = Color.FromArgb(5, 150, 105);
-                Warning = Color.FromArgb(180, 83, 9);
-                Danger = Color.FromArgb(220, 38, 38);
+                Success = Color.FromArgb(5, 150, 105);         // #059669
+                Warning = Color.FromArgb(217, 119, 6);         // #D97706
+                Danger = Color.FromArgb(220, 38, 38);          // #DC2626
                 DangerHover = Color.FromArgb(239, 68, 68);
-                Purple = Color.FromArgb(124, 58, 237);
-                Cyan = Color.FromArgb(2, 132, 199);
-                Prism = Color.FromArgb(14, 165, 233);
+                Purple = Color.FromArgb(124, 58, 237);         // #7C3AED
+                Cyan = Color.FromArgb(2, 132, 199);            // #0284C7
+                Prism = Cyan;
 
-                GridHeader = Color.FromArgb(237, 241, 246);
+                GridHeader = Color.FromArgb(240, 242, 246);
                 GridRow = Color.FromArgb(255, 255, 255);
-                GridRowAlt = Color.FromArgb(247, 249, 252);
-                GridSelection = Color.FromArgb(37, 99, 235);
-                GridHover = Color.FromArgb(239, 243, 249);
+                GridRowAlt = Color.FromArgb(247, 248, 251);
+                GridSelection = Color.FromArgb(37, 99, 235);   // #2563EB（白字选中）
+                GridHover = Color.FromArgb(236, 239, 245);
 
-                ScrollTrack = Color.FromArgb(30, 15, 23, 42);
-                RowBorder = Color.FromArgb(226, 232, 240);
+                RowBorder = Color.FromArgb(228, 231, 237);
                 ScrollThumb = Color.FromArgb(56, 15, 23, 42);
                 ScrollThumbHover = Color.FromArgb(96, 15, 23, 42);
                 KnobOff = Color.FromArgb(255, 255, 255);
                 CardHighlight = Color.FromArgb(14, 0, 0, 0);
-                SelFillPercent = 90;
 
                 NavHover = Color.FromArgb(12, 15, 23, 42);
                 NavPressed = Color.FromArgb(226, 232, 240);
                 NavSelTop = Color.FromArgb(38, 37, 99, 235);
                 NavSelBottom = Color.FromArgb(18, 37, 99, 235);
                 NavSelBorderTop = Color.FromArgb(46, 37, 99, 235);
-                NavSelBorderBottom = Color.FromArgb(20, 37, 99, 235);
                 NavSelIconBg = Color.FromArgb(34, 37, 99, 235);
                 NavGroupText = TextMuted;
 
@@ -352,74 +353,70 @@ namespace GuyueBox.UI
             }
             else
             {
-                // ===== 设计深色：深空灰玻璃 + 精密描边（DarkTheme.xaml）=====
-                ShellBg = Color.FromArgb(5, 5, 8);          // #050508
-                AppBgTop = Color.FromArgb(5, 5, 8);         // #050508
-                AppBgBottom = Color.FromArgb(12, 18, 32);   // #0C1220
-                SidebarBgTop = Color.FromArgb(5, 10, 24);   // #050A18
-                SidebarBgBottom = Color.FromArgb(7, 14, 33); // #070E21
+                // ===== 深色：深空灰磨砂 + 精密描边（克制精密）=====
+                ShellBg = Color.FromArgb(15, 16, 16);         // #0F0F10
+                SidebarBgTop = Color.FromArgb(11, 11, 13);    // #0B0B0D
+                SidebarBgBottom = Color.FromArgb(8, 8, 10);   // #08080A
 
                 ChromeBg = ShellBg;
-                SidebarBg = SidebarBgBottom;
-                WindowBg = Color.FromArgb(9, 13, 22);       // 工作区底板（AppBackground 中段）
-                CardBg = Color.FromArgb(15, 21, 37);        // Theme.Background.Card #0F1525
-                CardBgAlt = Color.FromArgb(21, 28, 47);     // CardAlt #151C2F
-                CardHover = Color.FromArgb(27, 35, 53);     // Surface #1B2335
+                SidebarBg = SidebarBgTop;
+                WindowBg = Color.FromArgb(19, 19, 22);        // #131316
+                CardBg = Color.FromArgb(26, 26, 28);          // #1A1A1C
+                CardBgAlt = Color.FromArgb(32, 32, 36);       // #202024
+                CardHover = Color.FromArgb(38, 38, 43);       // #26262B
 
-                BorderSoft = Color.FromArgb(31, 31, 35);    // #1F1F23
-                Border = Color.FromArgb(39, 39, 42);        // #27272A
-                BorderStrong = Color.FromArgb(63, 63, 70);  // #3F3F46
+                BorderSoft = Color.FromArgb(42, 42, 46);      // #2A2A2E
+                Border = Color.FromArgb(56, 56, 62);          // #38383E
+                BorderStrong = Color.FromArgb(74, 74, 82);    // #4A4A52
 
-                TextPrimary = Color.FromArgb(248, 250, 252);  // #F8FAFC
-                TextSecondary = Color.FromArgb(203, 213, 225); // #CBD5E1
-                TextMuted = Color.FromArgb(174, 184, 199);     // #AEB8C7
+                TextPrimary = Color.FromArgb(244, 244, 246);  // #F4F4F6
+                TextSecondary = Color.FromArgb(200, 200, 207);// #C8C8CF
+                // 次要文字提亮：原 #8F8F99 在深色卡片上对比偏低（说明、状态、计数都读得吃力），
+                // 提到 #A6A6B2 仍明显弱于次级文字 #C8C8CF，层级不变但可读性达标。
+                TextMuted = Color.FromArgb(166, 166, 178);    // #A6A6B2
 
-                Success = Color.FromArgb(52, 211, 153);     // #34D399
-                Warning = Color.FromArgb(251, 191, 36);     // #FBBF24
-                Danger = Color.FromArgb(248, 113, 113);     // #F87171
-                DangerHover = Color.FromArgb(252, 165, 165);
-                // 设计刻意「无彩虹」：紫/青收敛为强调色的邻近色，只承担层次不承担装饰
-                Purple = Color.FromArgb(139, 92, 246);
-                Cyan = Color.FromArgb(96, 165, 250);        // Info #60A5FA
-                Prism = Color.FromArgb(96, 165, 250);
+                Success = Color.FromArgb(52, 199, 89);        // #34C759
+                Warning = Color.FromArgb(255, 149, 0);        // #FF9500
+                Danger = Color.FromArgb(255, 59, 48);         // #FF3B30
+                DangerHover = Color.FromArgb(255, 107, 97);   // #FF6B61
+                Purple = Color.FromArgb(167, 139, 250);       // #A78BFA
+                Cyan = Color.FromArgb(90, 200, 250);          // #5AC8FA
+                Prism = Color.FromArgb(90, 200, 250);         // #5AC8FA
 
-                GridHeader = Color.FromArgb(12, 18, 32);
-                GridRow = Color.FromArgb(15, 21, 37);
-                GridRowAlt = Color.FromArgb(20, 28, 43);    // Row.Background #141C2B
-                GridSelection = Color.FromArgb(30, 58, 95);  // PrimaryMuted #1E3A5F
-                // 悬停行必须与斑马纹（#141C2B）可区分，否则深色下 hover 看不出来
-                GridHover = Color.FromArgb(26, 35, 52);
+                GridHeader = Color.FromArgb(22, 22, 25);      // #161619
+                GridRow = Color.FromArgb(26, 26, 28);         // #1A1A1C
+                GridRowAlt = Color.FromArgb(30, 30, 34);      // #1E1E22
+                GridSelection = Color.FromArgb(30, 58, 95);   // #1E3A5F
+                GridHover = Color.FromArgb(35, 35, 39);       // #232327
 
-                ScrollTrack = Color.FromArgb(42, 56, 80);   // #2A3850
-                RowBorder = Color.FromArgb(51, 65, 85);     // #334155
-                ScrollThumb = Color.FromArgb(82, 100, 125);   // #52647D
-                ScrollThumbHover = Color.FromArgb(120, 144, 174); // #7890AE
-                KnobOff = Color.FromArgb(82, 100, 125);
+                RowBorder = Color.FromArgb(42, 42, 46);       // #2A2A2E
+                ScrollThumb = Color.FromArgb(58, 58, 64);     // #3A3A40
+                ScrollThumbHover = Color.FromArgb(74, 74, 82);// #4A4A52
+                KnobOff = Color.FromArgb(58, 58, 64);         // #3A3A40
                 CardHighlight = Color.FromArgb(20, 255, 255, 255); // #14FFFFFF
-                SelFillPercent = 100;
 
-                // 导航状态（GlassPillNavItem）
+                // 导航状态
                 NavHover = Color.FromArgb(12, 255, 255, 255);      // #0CFFFFFF
-                NavPressed = Color.FromArgb(23, 34, 53);           // #172235
+                NavPressed = Color.FromArgb(35, 35, 39);           // #232327
                 NavSelTop = Color.FromArgb(36, 59, 130, 246);      // #243B82F6
                 NavSelBottom = Color.FromArgb(18, 59, 130, 246);   // #123B82F6
                 NavSelBorderTop = Color.FromArgb(37, 255, 255, 255);  // #25FFFFFF
-                NavSelBorderBottom = Color.FromArgb(16, 255, 255, 255); // #10FFFFFF
                 NavSelIconBg = Color.FromArgb(32, 59, 130, 246);   // #203B82F6
-                NavGroupText = TextSecondary;
+                NavGroupText = TextMuted;
 
                 // 玻璃承载层
-                GlassCardBg = Color.FromArgb(12, 255, 255, 255);
-                GlassCardHover = Color.FromArgb(21, 255, 255, 255);
-                GlassBorder = Color.FromArgb(21, 255, 255, 255);
+                GlassCardBg = Color.FromArgb(13, 255, 255, 255);     // #0DFFFFFF
+                GlassCardHover = Color.FromArgb(21, 255, 255, 255);  // #15FFFFFF
+                // 卡片/说明栏的边缘：10% 白在深色底上几乎看不见，抬到 16% 让每块面板有明确边界
+                GlassBorder = Color.FromArgb(41, 255, 255, 255);     // #29FFFFFF
 
                 // 外壳窗框
-                FrameTop = Color.FromArgb(82, 100, 125);      // #52647D
-                FrameSide = Color.FromArgb(51, 65, 85);       // #334155
-                FrameBottom = Color.FromArgb(30, 41, 59);     // #1E293B
-                FrameInnerHighlight = Color.FromArgb(20, 255, 255, 255);
-                HeroGlow = Color.FromArgb(37, 99, 235);       // #2563EB
-                LightBeam = Color.FromArgb(21, 255, 255, 255);
+                FrameTop = Color.FromArgb(63, 70, 84);        // #3F4654
+                FrameSide = Color.FromArgb(42, 46, 56);       // #2A2E38
+                FrameBottom = Color.FromArgb(30, 33, 41);     // #1E2129
+                FrameInnerHighlight = Color.FromArgb(20, 255, 255, 255); // #14FFFFFF
+                HeroGlow = Color.FromArgb(59, 130, 246);      // #3B82F6
+                LightBeam = Color.FromArgb(16, 255, 255, 255);// #10FFFFFF
                 TextOnAccent = Color.FromArgb(15, 23, 42);    // #0F172A 深墨
 
                 Array.Copy(DarkPalette, Palette, Palette.Length);
@@ -533,10 +530,10 @@ namespace GuyueBox.UI
         // 界面尺寸的唯一事实来源：改这里即可全局生效，避免各页面各写一套魔数。
 
         /// <summary>卡片 / 大容器圆角（设计 CardLarge = 8：精密而非圆润）。</summary>
-        public const int RadiusCard = 8;
+        public const int RadiusCard = 12;
 
-        /// <summary>小徽标 / 图标底圆角（设计 Token.Radius.Icon = 4，小元素不做过度圆角）。</summary>
-        public const int RadiusChip = 4;
+        /// <summary>小徽标 / 图标底圆角（小元素不做过度圆角，6 与按钮档拉开一点层级）。</summary>
+        public const int RadiusChip = 9;
 
         /// <summary>页面内容区左右内边距。</summary>
         public const int PagePadX = 30;
@@ -559,7 +556,7 @@ namespace GuyueBox.UI
         /// <summary>页头高度。</summary>
         public const int HeaderHeight = 92;
 
-        /// <summary>嵌入模式（合并页子页）操作条高度。</summary>
+        /// <summary>嵌入模式（被页签宿主内嵌的子页）操作条高度。</summary>
         public const int ActionBarHeight = 46;
 
         /// <summary>页头操作按钮高度（设计 Token.Size.ButtonHeight = 36）。</summary>
@@ -567,6 +564,12 @@ namespace GuyueBox.UI
 
         /// <summary>紧凑按钮高度（设计 Token.Size.ButtonHeightSm = 28，筛选用 chips 用）。</summary>
         public const int ButtonHeightSm = 28;
+
+        /// <summary>
+        /// 行内按钮高度（列表行、卡片内工具行）。
+        /// 此前各页分别写 30 / 32 两套值，同屏能看到两种高度；统一以本 token 为准。
+        /// </summary>
+        public const int RowButtonHeight = 30;
 
         /// <summary>侧栏宽度（设计 220）。</summary>
         public const int SidebarWidth = 220;
@@ -603,35 +606,22 @@ namespace GuyueBox.UI
             return "Segoe UI";
         }
 
-        /// <summary>等宽字体探测（设计 Token.FontFamily.Mono：Cascadia Mono → Consolas → Courier New）。</summary>
+        /// <summary>
+        /// 等宽内容字体。字体风格统一后不再切到 Cascadia Mono / Consolas：
+        /// 直接复用界面字体（注册表路径这类内容用界面字体同样清楚，且与全站观感一致）。
+        /// </summary>
         private static Font PickMono()
         {
-            string[] candidates = new string[] { "Cascadia Mono", "Cascadia Code", "Consolas", "Courier New" };
-            foreach (string c in candidates)
-            {
-                try
-                {
-                    using (Font probe = new Font(c, 9F))
-                    {
-                        // 注意：probe 只是探测用，必须新建实例返回——返回已释放的字体是隐性崩溃源
-                        if (string.Equals(probe.Name, c, StringComparison.OrdinalIgnoreCase))
-                        {
-                            return new Font(c, 9F);
-                        }
-                    }
-                }
-                catch
-                {
-                }
-            }
-            return new Font(FontFamily.GenericMonospace, 9F);
+            return new Font(Family, 9F);
         }
 
         // 字体只创建一次并长期复用，避免频繁绘制产生 GDI 句柄泄漏。
-        // 字号按设计 Token.FontSize 层级换算（px → pt）：Xs11≈8.25 / Sm12≈9 / Base14≈10.5 /
-        // Lg16≈12 / Xl18≈13.5 / 2xl22≈16.5 / 3xl28≈21。
+        // 字号单位为 Point（GDI+ 默认单位），随系统 DPI 自动缩放；层级为清晰中文 UI 调校：
+        // Micro 8.25 / Small 9 / Body 10 / SubTitle 11 / Title 16 / Metric 21（粗体用于强调与数值）。
         public static readonly Font FontMicro = new Font(Family, 8.25F);
         public static readonly Font FontSmall = new Font(Family, 9F);
+        /// <summary>小号粗体：详情栏段标题等紧凑层级用（v2.2 新增）。</summary>
+        public static readonly Font FontSmallBold = new Font(Family, 9F, FontStyle.Bold);
         public static readonly Font FontBody = new Font(Family, 10F);
         public static readonly Font FontBodyBold = new Font(Family, 10F, FontStyle.Bold);
         public static readonly Font FontNav = new Font(Family, 10F);
@@ -647,7 +637,6 @@ namespace GuyueBox.UI
             get { return Family; }
         }
     }
-
     /// <summary>
     /// 配色方案切换后的「皮肤重刷」：递归遍历控件树，把那些 BackColor 恰好等于
     /// 旧方案颜色的控件改写成新方案对应颜色。
@@ -699,166 +688,4 @@ namespace GuyueBox.UI
         }
     }
 
-    /// <summary>绘制辅助。</summary>
-    public static class Gfx
-    {
-        public static GraphicsPath RoundRect(Rectangle r, int radius)
-        {
-            GraphicsPath path = new GraphicsPath();
-            if (r.Width <= 0 || r.Height <= 0)
-            {
-                path.AddRectangle(new Rectangle(r.X, r.Y, Math.Max(1, r.Width), Math.Max(1, r.Height)));
-                return path;
-            }
-
-            int d = radius * 2;
-            if (d <= 0)
-            {
-                path.AddRectangle(r);
-                return path;
-            }
-            if (d > r.Width) d = r.Width;
-            if (d > r.Height) d = r.Height;
-
-            path.AddArc(r.X, r.Y, d, d, 180, 90);
-            path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
-            path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-            path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
-            path.CloseFigure();
-            return path;
-        }
-
-        /// <summary>填充圆角矩形。路径与画刷均走缓存，避免每帧创建 GDI 对象。</summary>
-        public static void FillRound(Graphics g, Rectangle r, int radius, Color color)
-        {
-            if (r.Width <= 0 || r.Height <= 0) return;
-
-            GraphicsPath path = GdiCache.RoundRect(r, radius);
-            GraphicsState st = g.Save();
-            g.TranslateTransform(r.X, r.Y);
-            g.FillPath(GdiCache.Brush(color), path);
-            g.Restore(st);
-        }
-
-        public static void StrokeRound(Graphics g, Rectangle r, int radius, Color color, float width)
-        {
-            if (r.Width <= 0 || r.Height <= 0) return;
-
-            GraphicsPath path = GdiCache.RoundRect(r, radius);
-            GraphicsState st = g.Save();
-            g.TranslateTransform(r.X, r.Y);
-            g.DrawPath(GdiCache.Pen(color, width), path);
-            g.Restore(st);
-        }
-
-        /// <summary>卡片风格：填充 + 描边 + 顶部 1px 高光，营造轻微立体感。</summary>
-        public static void DrawCard(Graphics g, Rectangle r, int radius, Color fill, Color border, bool highlight)
-        {
-            if (r.Width <= 0 || r.Height <= 0) return;
-
-            GraphicsPath path = GdiCache.RoundRect(r, radius);
-            GraphicsState st = g.Save();
-            g.TranslateTransform(r.X, r.Y);
-            try
-            {
-                g.FillPath(GdiCache.Brush(fill), path);
-                if (highlight)
-                {
-                    // 设计内高光：上缘通亮、向下渐隐（渐变描边），而不是整圈等亮。
-                    // 路径是 (0,0) 基准的局部坐标，故渐变矩形同样用局部坐标。
-                    using (LinearGradientBrush hb = new LinearGradientBrush(
-                        new Rectangle(0, 0, 1, Math.Max(1, r.Height)),
-                        Theme.CardHighlight, Color.Transparent, 90f))
-                    using (Pen hp = new Pen(hb, 1f))
-                    {
-                        g.DrawPath(hp, path);
-                    }
-                }
-                g.DrawPath(GdiCache.Pen(border, 1f), path);
-            }
-            finally
-            {
-                g.Restore(st);
-            }
-        }
-
-        public static void EnableSmoothing(Graphics g)
-        {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
-        }
-
-        /// <summary>把颜色按比例调亮 / 调暗。</summary>
-        public static Color Shade(Color c, double factor)
-        {
-            int r = Clamp(c.R * factor);
-            int g = Clamp(c.G * factor);
-            int b = Clamp(c.B * factor);
-            return Color.FromArgb(c.A, r, g, b);
-        }
-
-        private static int Clamp(double v)
-        {
-            if (v < 0) return 0;
-            if (v > 255) return 255;
-            return (int)v;
-        }
-
-        public static Color Blend(Color a, Color b, double t)
-        {
-            if (t < 0) t = 0;
-            if (t > 1) t = 1;
-            return Color.FromArgb(
-                (int)(a.R + (b.R - a.R) * t),
-                (int)(a.G + (b.G - a.G) * t),
-                (int)(a.B + (b.B - a.B) * t));
-        }
-
-        /// <summary>
-        /// 带 alpha 的颜色插值。<see cref="Blend"/> 会把结果 alpha 固定为 255，
-        /// 透明 / 半透明色参与状态过渡时会被拉成不透明（例如 Ghost 按钮凭空出现实心底），
-        /// 因此凡是有透明度参与的混合都必须用这个重载。
-        /// </summary>
-        public static Color BlendArgb(Color a, Color b, double t)
-        {
-            if (t < 0) t = 0;
-            if (t > 1) t = 1;
-            return Color.FromArgb(
-                (int)(a.A + (b.A - a.A) * t),
-                (int)(a.R + (b.R - a.R) * t),
-                (int)(a.G + (b.G - a.G) * t),
-                (int)(a.B + (b.B - a.B) * t));
-        }
-
-        /// <summary>带透明度的颜色。</summary>
-        public static Color Alpha(Color c, int alpha)
-        {
-            if (alpha < 0) alpha = 0;
-            if (alpha > 255) alpha = 255;
-            return Color.FromArgb(alpha, c.R, c.G, c.B);
-        }
-
-        /// <summary>根据占用率返回语义化颜色。</summary>
-        public static Color LoadColor(double percent)
-        {
-            if (percent < 0) return Theme.Accent;
-            if (percent >= 90) return Theme.Danger;
-            if (percent >= 70) return Theme.Warning;
-            return Theme.Success;
-        }
-
-        /// <summary>绘制单行文本，过长时自动省略号。</summary>
-        public static void DrawTextEllipsis(Graphics g, string text, Font font, Color color, Rectangle bounds)
-        {
-            if (string.IsNullOrEmpty(text) || bounds.Width <= 0) return;
-            g.DrawString(text, font, GdiCache.Brush(color), bounds, GdiCache.Ellipsis);
-        }
-
-        /// <summary>在指定矩形内居中绘制文本。</summary>
-        public static void DrawTextCenter(Graphics g, string text, Font font, Color color, Rectangle bounds)
-        {
-            if (string.IsNullOrEmpty(text) || bounds.Width <= 0) return;
-            g.DrawString(text, font, GdiCache.Brush(color), bounds, GdiCache.EllipsisCenter);
-        }
-    }
 }

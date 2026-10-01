@@ -1,10 +1,10 @@
-﻿/* ============================================================
+﻿﻿/* ============================================================
  * 文件说明：Toast 反馈浮层（对齐设计规则 2.1 / 2.4 / 3.9）：
  *           - 底部居中、不抢焦点、不打断当前操作（区别于 MessageBox）；
  *           - 主句说明"做了什么"，副句说明"细节/下一步"，两层信息不挤在一行；
  *           - 自动消失（成功 2.4s / 需注意 3.4s），点击立即关闭；
  *           - 栈式最多 3 条，超出丢弃最旧的。
- * 项目：古月工具包（GuyueBox）
+ * 项目：古月工具箱（GuyueBox）
  * ============================================================ */
 
 using System;
@@ -42,7 +42,6 @@ namespace GuyueBox.UI
         }
 
         private readonly List<Item> _items = new List<Item>();
-        private readonly Timer _timer;
 
         private const int MaxItems = 3;
         private const int PadY = 12;
@@ -62,9 +61,7 @@ namespace GuyueBox.UI
             Visible = false;
             Width = ToastWidth;
 
-            _timer = new Timer();
-            _timer.Interval = 40;
-            _timer.Tick += delegate { Tick(); };
+            // 动画与生命周期统一由 AnimationClock 驱动（16ms 粒度，等价于原 40ms 超时计时）
         }
 
         /// <summary>显示一条 Toast。副句可留空。</summary>
@@ -84,7 +81,7 @@ namespace GuyueBox.UI
             while (_items.Count > MaxItems) _items.RemoveAt(0);
 
             Relayout();
-            if (!_timer.Enabled) _timer.Start();
+            AnimationClock.Instance.Subscribe(ToastTick);
             Visible = true;
             BringToFront();
             Invalidate();
@@ -112,13 +109,13 @@ namespace GuyueBox.UI
             }
         }
 
-        private void Tick()
+        private void ToastTick()
         {
             bool changed = false;
             for (int i = _items.Count - 1; i >= 0; i--)
             {
                 Item it = _items[i];
-                it.ElapsedMs += _timer.Interval;
+                it.ElapsedMs += 16;
                 if (it.ElapsedMs >= it.LifeMs + it.FadeOutMs)
                 {
                     _items.RemoveAt(i);
@@ -128,7 +125,7 @@ namespace GuyueBox.UI
 
             if (_items.Count == 0)
             {
-                _timer.Stop();
+                AnimationClock.Instance.Unsubscribe(ToastTick);
                 Visible = false;
                 return;
             }
@@ -174,22 +171,13 @@ namespace GuyueBox.UI
                 if (e.Y >= y && e.Y < y + h)
                 {
                     _items.RemoveAt(i);
-                    if (_items.Count == 0) { _timer.Stop(); Visible = false; }
+                    if (_items.Count == 0) { AnimationClock.Instance.Unsubscribe(ToastTick); Visible = false; }
                     else { Relayout(); Invalidate(); }
                     return;
                 }
                 y += h + Gap;
             }
             base.OnMouseUp(e);
-        }
-
-        /// <summary>
-        /// 把颜色换成"已合成的实色"：保留 RGB、把 alpha 落到指定透明度。
-        /// 用于自绘时手动做淡入淡出，避免半透明叠加到错误的父级底色上。
-        /// </summary>
-        private static Color Opaque(Color c, int alpha)
-        {
-            return Color.FromArgb(alpha, c.R, c.G, c.B);
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -219,16 +207,28 @@ namespace GuyueBox.UI
                 if (alpha <= 0.02) { y += h + Gap; continue; }
                 int a = (int)(alpha * 255);
 
+                // 进出场位移：淡入时自下方 12px 滑上来、淡出时向上 10px 滑走。
+                // 原来只有透明度变化，观感上接近"直接出现"；加上位移后才有"浮上来"的层次。
+                int slide = 0;
+                if (it.ElapsedMs < it.FadeInMs)
+                {
+                    slide = (int)((1.0 - alpha) * 12);
+                }
+                else if (it.ElapsedMs > it.LifeMs)
+                {
+                    slide = -(int)((1.0 - alpha) * 10);
+                }
+
                 // 颜色全部自己合成，不能依赖"多层半透明叠加"：
                 // 本控件的父级是主窗体（背景为外壳色），而非页面内容，
                 // 半透明会与外壳色混合出错误的底色。且玻璃色本身是"白 + 低 alpha"，
                 // 直接把 alpha 改写成不透明会得到纯白底——暗色主题下就成了白底白字。
-                Color card = Opaque(Theme.CardBg, a);
-                Color tone = Opaque(it.Tone, a);
-                Color toneSoft = Opaque(Gfx.Blend(Theme.CardBg, it.Tone, 0.24), a);
-                Color border = Opaque(Gfx.Blend(Theme.CardBg, it.Tone, 0.55), a);
+                Color card = Gfx.Alpha(Theme.CardBg, a);
+                Color tone = Gfx.Alpha(it.Tone, a);
+                Color toneSoft = Gfx.Alpha(Gfx.Blend(Theme.CardBg, it.Tone, 0.24), a);
+                Color border = Gfx.Alpha(Gfx.Blend(Theme.CardBg, it.Tone, 0.55), a);
 
-                Rectangle box = new Rectangle(0, y, Math.Max(80, Width - 1), h - 1);
+                Rectangle box = new Rectangle(0, y + slide, Math.Max(80, Width - 1), h - 1);
                 Gfx.FillRound(g, box, Theme.RadiusCard, card);
                 Gfx.StrokeRound(g, box, Theme.RadiusCard, border, 1f);
 
@@ -238,15 +238,15 @@ namespace GuyueBox.UI
                 Rectangle iconBox = new Rectangle(box.X + 16, box.Y + PadY + 1, 20, 20);
                 Gfx.FillRound(g, iconBox, 10, toneSoft);
                 IconPainter.Draw(g, it.Icon, new Rectangle(iconBox.X + 5, iconBox.Y + 5, 10, 10),
-                    Opaque(Gfx.Blend(Theme.CardBg, it.Tone, 0.9), a));
+                    Gfx.Alpha(Gfx.Blend(Theme.CardBg, it.Tone, 0.9), a));
 
                 int textX = iconBox.Right + 12;
                 int textW = Math.Max(60, box.Right - textX - 16);
-                Gfx.DrawTextEllipsis(g, it.Title, Theme.FontBodyBold, Opaque(Theme.TextPrimary, a),
+                Gfx.DrawTextEllipsis(g, it.Title, Theme.FontBodyBold, Gfx.Alpha(Theme.TextPrimary, a),
                     new Rectangle(textX, box.Y + PadY - 1, textW, 20));
                 if (it.Sub.Length > 0)
                 {
-                    Gfx.DrawTextEllipsis(g, it.Sub, Theme.FontSmall, Opaque(Theme.TextSecondary, a),
+                    Gfx.DrawTextEllipsis(g, it.Sub, Theme.FontSmall, Gfx.Alpha(Theme.TextSecondary, a),
                         new Rectangle(textX, box.Y + PadY + 19, textW, 18));
                 }
 
@@ -256,7 +256,7 @@ namespace GuyueBox.UI
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing && _timer != null) _timer.Stop();
+            if (disposing) AnimationClock.Instance.Unsubscribe(ToastTick);
             base.Dispose(disposing);
         }
     }

@@ -1,4 +1,9 @@
-﻿using System;
+/* ============================================================
+ * 文件说明：Win32 API 封装：内存状态、回收站、无边框拖动、管理员判定
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
@@ -116,6 +121,35 @@ namespace GuyueBox.Core
         [DllImport("psapi.dll")]
         public static extern int EmptyWorkingSet(IntPtr hProcess);
 
+        // ---------- 系统性能计数（内存池 / 缓存 / 句柄 / 进程线程数） ----------
+
+        /// <summary>
+        /// PERFORMANCE_INFORMATION（psapi）：计数字段以页为单位，调用方乘 PageSize 还原字节数。
+        /// 用 IntPtr 而非 uint/ulong 承接——该结构在 32/64 位下的字段宽度由 SIZE_T 决定。
+        /// </summary>
+        [StructLayout(LayoutKind.Sequential)]
+        public struct PERFORMANCE_INFORMATION
+        {
+            public uint cb;
+            public IntPtr CommitTotal;
+            public IntPtr CommitLimit;
+            public IntPtr CommitPeak;
+            public IntPtr PhysicalTotal;
+            public IntPtr PhysicalAvailable;
+            public IntPtr SystemCache;
+            public IntPtr KernelTotal;
+            public IntPtr KernelPaged;
+            public IntPtr KernelNonpaged;
+            public IntPtr PageSize;
+            public uint HandleCount;
+            public uint ProcessCount;
+            public uint ThreadCount;
+        }
+
+        [DllImport("psapi.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool GetPerformanceInfo(out PERFORMANCE_INFORMATION info, uint cb);
+
         // ---------- 权限 ----------
 
         public static bool IsElevated()
@@ -134,5 +168,17 @@ namespace GuyueBox.Core
             }
         }
 
+        private static bool? _elevatedCached;
+
+        /// <summary>是否以管理员身份运行。每次调用都重建 WindowsPrincipal，开销不小；
+        /// 进程生命周期内管理员身份不会改变，故缓存首次结果，供界面多处复用。</summary>
+        public static bool IsElevatedCached
+        {
+            get
+            {
+                if (!_elevatedCached.HasValue) _elevatedCached = IsElevated();
+                return _elevatedCached.Value;
+            }
+        }
     }
 }

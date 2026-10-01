@@ -1,4 +1,9 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：重复文件查找：按大小 + 内容指纹分组
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -31,7 +36,6 @@ namespace GuyueBox.Core
             get { return Size * Math.Max(0, Files.Count - 1); }
         }
     }
-
     public sealed class ScanState
     {
         public int FilesScanned;

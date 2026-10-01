@@ -1,11 +1,16 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：计时器分辨率：NtSet/NtQueryTimerResolution 与维持线程
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Runtime.InteropServices;
 using System.Threading;
 
 namespace GuyueBox.Core
 {
     /// <summary>
-    /// 高精度定时器（正确实现）：
+    /// 计时器分辨率（正确实现）：
     /// 1. NtSetTimerResolution 请求的精度可能被系统在特定事件后悄悄回落，
     ///    因此必须由**专用维持线程**周期性重发请求——社区 TimerResolution 类工具均为此实现；
     /// 2. 查询当前生效精度用 **NtQueryTimerResolution**（纯只读），

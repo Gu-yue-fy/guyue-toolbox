@@ -1,4 +1,9 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：DNS 服务器切换：网卡枚举、读取与设置
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Collections.Generic;
 using System.Text;
 
@@ -6,6 +11,7 @@ namespace GuyueBox.Core
 {
     public sealed class DnsPreset
     {
+        public string Region = "";
         public string Name = "";
         public string Primary = "";
         public string Secondary = "";
@@ -13,14 +19,6 @@ namespace GuyueBox.Core
 
     public static class DnsSwitch
     {
-        public static readonly DnsPreset[] Presets = new DnsPreset[]
-        {
-            new DnsPreset { Name = "Cloudflare (1.1.1.1)", Primary = "1.1.1.1", Secondary = "1.0.0.1" },
-            new DnsPreset { Name = "Google (8.8.8.8)", Primary = "8.8.8.8", Secondary = "8.8.4.4" },
-            new DnsPreset { Name = "AdGuard (防广告)", Primary = "94.140.14.14", Secondary = "94.140.15.15" },
-            new DnsPreset { Name = "OpenDNS", Primary = "208.67.222.222", Secondary = "208.67.220.220" }
-        };
-
         /// <summary>列出可配置 DNS 的网卡名（结构化 API，避免 netsh 文本解析的列数/编码坑）。</summary>
         public static List<string> ListAdapters()
         {
@@ -107,9 +105,13 @@ namespace GuyueBox.Core
                 "interface ip set dns name=\"" + adapter + "\" source=static addr=" + primary + " validate=no", 20000);
             if (!set1.Ok) { error = "设置主 DNS 失败：" + set1.All.Trim(); return false; }
 
-            Shell.Result set2 = Shell.Run("netsh.exe",
-                "interface ip add dns name=\"" + adapter + "\" addr=" + secondary + " index=2 validate=no", 20000);
-            if (!set2.Ok) { error = "设置备用 DNS 失败：" + set2.All.Trim(); return false; }
+            // 备用 DNS 为空（单节点服务器）时只设主 DNS，跳过 add 避免无效命令报错
+            if (!string.IsNullOrWhiteSpace(secondary))
+            {
+                Shell.Result set2 = Shell.Run("netsh.exe",
+                    "interface ip add dns name=\"" + adapter + "\" addr=" + secondary + " index=2 validate=no", 20000);
+                if (!set2.Ok) { error = "设置备用 DNS 失败：" + set2.All.Trim(); return false; }
+            }
             return true;
         }
 

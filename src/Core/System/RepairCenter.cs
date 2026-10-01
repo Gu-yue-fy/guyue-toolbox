@@ -1,9 +1,9 @@
-﻿/* ============================================================
+/* ============================================================
  * 文件说明：修复中心：扫描系统潜在故障并给出可执行的修复动作。
  *           设计原则（对齐设计 repair-center）：每一项都必须"真检测 + 真修复"，
  *           宁可少列几项，也不放无法验证或点了没用的假项；
  *           不能自动修的（如驱动异常）明确标注为"仅提示"，不提供假按钮。
- * 项目：古月工具包（GuyueBox）
+ * 项目：古月工具箱（GuyueBox）
  * ============================================================ */
 
 using System;
@@ -85,6 +85,9 @@ namespace GuyueBox.Core
             Report(phase, "优化项校验", 0);
             AddTweakChecks(list, phase);
 
+            Report(phase, "性能诊断", 0);
+            AddPerfChecks(list, phase);
+
             SetTimes(list);
             Report(phase, "完成", 100);
             return list;
@@ -115,6 +118,8 @@ namespace GuyueBox.Core
                     case "dns_cache": it.TimeText = "即时"; break;
                     case "hosts_abnormal": it.TimeText = "即时"; break;
                     case "tweak_recommend": it.TimeText = "视项数，通常 10~30 秒"; break;
+                    case "power_plan": it.TimeText = "即时（切换电源计划）"; break;
+                    case "startup_count": it.TimeText = "仅检测"; break;
                     default: it.TimeText = ""; break;
                 }
             }
@@ -346,7 +351,7 @@ namespace GuyueBox.Core
                 }
                 hosts.Detected = lines > 200;
                 hosts.Detail = hosts.Detected
-                    ? "hosts 里有 " + lines + " 条生效规则，数量异常，可能是被修改软件写入。可在「Hosts 编辑」页核对。"
+                    ? "hosts 里有 " + lines + " 条生效规则，数量异常，可能是被修改软件写入。可打开 %SystemRoot%\\System32\\drivers\\etc\\hosts 核对。"
                     : "hosts 生效规则 " + lines + " 条，正常。";
             }
             catch
@@ -399,6 +404,45 @@ namespace GuyueBox.Core
                 dev.Detail = "无法查询设备状态。";
             }
             list.Add(dev);
+            Report(phase, "驱动与设备", 60);
+
+            // ⑧b N 卡帧率补丁 KB5074109：已知会导致部分 N 卡掉 15~20 FPS，只提示卸载方式、不强删
+            RepairItem nvPatch = New("kb5074109", "驱动与设备", "N 卡帧率补丁检测", 10);
+            nvPatch.Fixable = false; // 只做说明：卸载属于系统更新决策，不代用户删除
+            try
+            {
+                bool installed = false;
+                using (ManagementObjectSearcher searcher = new ManagementObjectSearcher(
+                    "SELECT HotFixID FROM Win32_QuickFixEngineering"))
+                {
+                    foreach (ManagementBaseObject o in searcher.Get())
+                    {
+                        try
+                        {
+                            object hotfix = o["HotFixID"];
+                            if (hotfix != null &&
+                                string.Equals(hotfix.ToString().Trim(), "KB5074109", StringComparison.OrdinalIgnoreCase))
+                            {
+                                installed = true;
+                                break;
+                            }
+                        }
+                        catch
+                        {
+                        }
+                    }
+                }
+                nvPatch.Detected = installed;
+                nvPatch.Detail = installed
+                    ? "已安装补丁 KB5074109：该补丁已知会导致部分 N 卡游戏掉帧（约 15~20 FPS）。"
+                      + "可到「设置 → Windows 更新 → 更新历史记录」卸载，或运行 wusa /uninstall /kb:5074109。"
+                    : "未安装可能导致 N 卡掉帧的补丁 KB5074109。";
+            }
+            catch
+            {
+                nvPatch.Detail = "无法查询已安装的补丁列表（需要管理员权限）。";
+            }
+            list.Add(nvPatch);
             Report(phase, "驱动与设备", 100);
         }
 
@@ -416,8 +460,8 @@ namespace GuyueBox.Core
                 string output = "";
                 try
                 {
-                    Shell.Result r1 = Shell.Run("wevtutil.exe", "cl System", 30000);
-                    Shell.Result r2 = Shell.Run("wevtutil.exe", "cl Application", 30000);
+                    Shell.Result r1 = Shell.Run("wevtutil.exe", "cl System", 30000, isChange: true);
+                    Shell.Result r2 = Shell.Run("wevtutil.exe", "cl Application", 30000, isChange: true);
                     output = r1.Ok && r2.Ok ? "已清空系统与应用程序日志。" : "部分日志清空失败（可能需要管理员权限）。";
                 }
                 catch (Exception ex)
@@ -467,7 +511,7 @@ namespace GuyueBox.Core
             rec.FixLabel = "应用推荐项";
             rec.Action = delegate (RepairItem it)
             {
-                List<ITweak> back = TweakLibrary.All();
+                List<ITweak> back = all;
                 int ok = 0;
                 int fail = 0;
                 for (int i = 0; i < back.Count; i++)
@@ -477,7 +521,7 @@ namespace GuyueBox.Core
                         ITweak t = back[i];
                         if (!t.Recommended || t.IsApplied()) continue;
                         if (t.AdminOnly && !Native.IsElevated()) continue;
-                        if (t.Apply()) ok++;
+                        if (TweakExecutor.Apply(t).IsOk) ok++;
                         else fail++;
                     }
                     catch
@@ -521,10 +565,65 @@ namespace GuyueBox.Core
         }
 
         // ==============================================================
+        // 性能诊断（电源计划 / 启动项）—— 电竞 / 渲染掉帧的高频诱因
+        // ==============================================================
+
+        private static readonly string SchemeHigh = "8c5e7fda-e8bf-4a96-9a85-a6e23a8b102c";
+
+        private static void AddPerfChecks(List<RepairItem> list, Action<string, int> phase)
+        {
+            // ⑪ 电源计划（未用「高性能」会直接损失游戏 / 渲染性能）
+            RepairItem plan = New("power_plan", "性能", "电源计划性能", 4);
+            plan.FixLabel = "切换到高性能";
+            plan.Action = delegate (RepairItem it)
+            {
+                Shell.Result r = Shell.Run("powercfg.exe", "/setactive " + SchemeHigh, 20000, isChange: true);
+                return r != null && r.Ok ? "已切换到「高性能」电源计划。" : "切换失败（可能需管理员权限）。";
+            };
+            try
+            {
+                Shell.Result r = Shell.Run("powercfg.exe", "/getactivescheme", 20000, false);
+                string outp = r != null ? (r.Output ?? "") : "";
+                bool isHigh = outp.IndexOf(SchemeHigh, StringComparison.OrdinalIgnoreCase) >= 0;
+                plan.Detected = !isHigh;
+                plan.Detail = isHigh
+                    ? "当前为「高性能」电源计划，性能已最优。"
+                    : "当前未使用「高性能」电源计划（可能损失游戏 / 渲染性能），建议切换。";
+            }
+            catch { plan.Detail = "无法读取当前电源计划。"; }
+            list.Add(plan);
+            Report(phase, "性能诊断", 50);
+
+            // ⑫ 启动项过多（仅提示，引导用户去启动与后台页手动清理）
+            RepairItem startup = New("startup_count", "性能", "启动项数量", 2);
+            startup.Fixable = false;
+            try
+            {
+                List<StartupItem> items = StartupManager.Load();
+                int n = items == null ? 0 : items.Count;
+                startup.Detected = n >= 8;
+                startup.Detail = "当前有 " + n + " 个启动项" +
+                    (startup.Detected
+                        ? "，偏多会拖慢开机，建议到「系统 → 启动与后台」禁用不必要的项。"
+                        : "，处于合理范围。");
+            }
+            catch { startup.Detail = "无法读取启动项数量。"; }
+            list.Add(startup);
+            Report(phase, "性能诊断", 100);
+        }
+
+        // ==============================================================
         // 执行修复
         // ==============================================================
 
-        /// <summary>执行单项修复，返回给用户看的结果文案。</summary>
+        /// <summary>
+        /// 执行单项修复，返回给用户看的结果文案。
+        ///
+        /// 这里**不改** <see cref="RepairItem.Detected"/> / <see cref="RepairItem.Fixed"/>：
+        /// 早期实现执行完动作就无条件把 Detected 置 false、Fixed 置 true，于是"修复完立刻 100 分"，
+        /// 可再扫一遍同样的问题还在——分数是假的。现在只有"动作执行成功"这一层事实，
+        /// 是否真的修好由调用方**重新检测**后写回（见 RepairView 修复后复检）。
+        /// </summary>
         public static string Fix(RepairItem item)
         {
             if (item == null) return "无效的修复项。";
@@ -533,10 +632,7 @@ namespace GuyueBox.Core
 
             try
             {
-                string msg = item.Action(item);
-                item.Fixed = true;
-                item.Detected = false;
-                return msg;
+                return item.Action(item);
             }
             catch (Exception ex)
             {
@@ -649,12 +745,13 @@ namespace GuyueBox.Core
 
             if (blocked)
             {
-                // 重启资源管理器以释放占用（会短暂闪烁任务栏，属预期行为）
-                Shell.Run("taskkill.exe", "/F /IM explorer.exe", 15000);
-                System.Threading.Thread.Sleep(800);
+                // 重启资源管理器以释放占用（会短暂闪烁任务栏，属预期行为）。
+                // 该修复动作在后台线程执行（见 RepairView），不会阻塞 UI；
+                // 等待改为小步循环（8×100ms），分步休眠便于及时让出，也避免单次长眠。
+                Shell.Run("taskkill.exe", "/F /IM explorer.exe", 15000, isChange: true);
+                for (int i = 0; i < 8; i++) System.Threading.Thread.Sleep(100);
                 removed += DeleteFiles(files, false);
-                try { using (Process.Start("explorer.exe")) { } }
-                catch { }
+                Shell.OpenExplorer();
             }
             return removed;
         }

@@ -1,4 +1,9 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：磁盘使用面板：卷标 + 使用条 + 可用空间
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
@@ -64,7 +69,7 @@ namespace GuyueBox.UI
                 x = 46;
             }
 
-            using (SolidBrush b = new SolidBrush(Theme.TextPrimary))
+            SolidBrush b = GdiCache.Brush(Theme.TextPrimary);
             using (StringFormat sf = new StringFormat())
             {
                 sf.LineAlignment = StringAlignment.Center;
@@ -74,7 +79,7 @@ namespace GuyueBox.UI
                     new Rectangle(x, 12, Math.Max(10, Width - x - 18), 24), sf);
             }
 
-            using (Pen p = new Pen(Theme.BorderSoft))
+            Pen p = GdiCache.Pen(Theme.BorderSoft, 1f);
             {
                 g.DrawLine(p, 16, Card.HeaderSize - 3, Width - 17, Card.HeaderSize - 3);
             }

@@ -1,10 +1,4 @@
-/* ============================================================
- * 文件说明：优化项库「进阶项」：CPU 电源模型调优 + 网络暴露面 + Edge 覆盖层。
- *           - PowerSettingTweak：通用 powercfg 电源设置项（读当前方案默认值做还原）
- *           - NetbiosTweak：遍历 NetBT 接口子键禁用 NetBIOS
- *           电源项一律「只改交流电（AC）档、不动电池档」，避免笔记本离电后功耗失控。
- * 项目：古月工具包（GuyueBox）
- * ============================================================ */
+/* 文件说明：电源与启动优化项——休眠、快速启动、电源计划、CPU 电源模型（仅插电档）+ NetBIOS + Edge 游戏助手；含 PowerSettingTweak / NetbiosTweak 类。 */
 
 using System;
 using System.Collections.Generic;
@@ -40,13 +34,13 @@ namespace GuyueBox.Core
         public static bool Set(string subgroup, string settingGuid, int ac, int dc)
         {
             bool ok = Shell.Run("powercfg.exe",
-                "/setacvalueindex scheme_current " + subgroup + " " + settingGuid + " " + ac, 30000).Ok;
+                "/setacvalueindex scheme_current " + subgroup + " " + settingGuid + " " + ac, 30000, isChange: true).Ok;
             if (dc >= 0)
             {
                 ok &= Shell.Run("powercfg.exe",
-                    "/setdcvalueindex scheme_current " + subgroup + " " + settingGuid + " " + dc, 30000).Ok;
+                    "/setdcvalueindex scheme_current " + subgroup + " " + settingGuid + " " + dc, 30000, isChange: true).Ok;
             }
-            ok &= Shell.Run("powercfg.exe", "/setactive scheme_current", 30000).Ok;
+            ok &= Shell.Run("powercfg.exe", "/setactive scheme_current", 30000, isChange: true).Ok;
             return ok;
         }
 
@@ -61,7 +55,6 @@ namespace GuyueBox.Core
             catch { return -1; }
         }
     }
-
     /// <summary>
     /// 通用电源设置项：把「处理器电源管理」子组下的某个设置改成目标值。
     /// 还原时读取该设置在**当前方案**的出厂默认值写回（电源子树由 Power 服务托管，必须走 powercfg）。
@@ -148,7 +141,6 @@ namespace GuyueBox.Core
             return PowerCfg.Set(PowerCfg.SubProcessor, _settingGuid, ac, dc);
         }
     }
-
     /// <summary>
     /// 禁用 NetBIOS over TCP/IP：遍历 NetBT\Parameters\Interfaces 下每个已存在的接口子键，
     /// 把 NetbiosOptions 设为 2（禁用）。只处理已存在的接口，不凭空造键。
@@ -236,7 +228,6 @@ namespace GuyueBox.Core
             return RegHelper.Restore(Id);
         }
     }
-
     public static partial class TweakLibrary
     {
         /// <summary>进阶项：CPU 电源模型（仅插电档）+ NetBIOS + Edge 游戏助手。</summary>
@@ -273,19 +264,97 @@ namespace GuyueBox.Core
 
             list.Add(new NetbiosTweak());
 
-            RegTweak edgeAssist = new RegTweak();
-            edgeAssist.IdValue = "edge_game_assist_off";
-            edgeAssist.GroupValue = GAppearance;
-            edgeAssist.NameValue = "禁用 Edge 游戏助手";
-            edgeAssist.DescriptionValue =
+            var edgeAssist = RegTweak.Create("edge_game_assist_off", GAppearance,
+                "禁用 Edge 游戏助手",
                 "关闭 Edge 在游戏时弹出的「游戏助手」覆盖层（当前用户设置 + 机器策略双写），避免全屏游戏被打断。" +
-                "含机器策略写入，需要管理员权限。";
-            edgeAssist.AdminOnlyValue = true;
+                "含机器策略写入，需要管理员权限。",
+                adminOnly: true);
             edgeAssist.Enable.Add(RegWrite.Dword(RegistryHive.CurrentUser,
                 @"Software\Microsoft\Edge\GameAssist", "Enabled", 0));
             edgeAssist.Enable.Add(RegWrite.Dword(RegistryHive.LocalMachine,
                 @"SOFTWARE\Policies\Microsoft\Edge", "GameAssistEnabled", 0));
             list.Add(edgeAssist);
+
+            return list;
+        }
+
+        // ==================== 基础电源项（休眠 / 快速启动 / 电源计划） ====================
+
+        private static IEnumerable<ITweak> Power()
+        {
+            List<ITweak> list = new List<ITweak>();
+
+            list.Add(new ModernStandbyOffTweak());
+
+            CommandTweak hibernate = new CommandTweak();
+            hibernate.IdValue = "hibernate_off";
+            hibernate.GroupValue = GPower;
+            hibernate.NameValue = "关闭休眠功能";
+            hibernate.DescriptionValue = "删除 hiberfil.sys，可释放与内存等大的磁盘空间（常见 4~32 GB）。" +
+                "关闭后'快速启动'也会一并失效。";
+            hibernate.RiskyValue = true;
+            hibernate.EnableFile = "powercfg.exe";
+            hibernate.EnableArgs = "/hibernate off";
+            hibernate.RevertFile = "powercfg.exe";
+            hibernate.RevertArgs = "/hibernate on";
+            hibernate.Probe = delegate
+            {
+                return RegHelper.GetInt(RegistryHive.LocalMachine,
+                    @"SYSTEM\CurrentControlSet\Control\Power", "HibernateEnabled", 1) == 0;
+            };
+            list.Add(hibernate);
+
+            CommandTweak highPerf = new CommandTweak();
+            highPerf.IdValue = "power_high";
+            highPerf.GroupValue = GPower;
+            highPerf.NameValue = "启用高性能电源计划";
+            highPerf.DescriptionValue = "锁定到高性能电源方案，CPU 不再为省电而降频。笔记本续航会下降。";
+            highPerf.RiskyValue = true;
+            highPerf.EnableFile = "powercfg.exe";
+            highPerf.EnableArgs = "/setactive " + PowerPlans.SchemeHighPerformance;
+            highPerf.RevertFile = "powercfg.exe";
+            highPerf.RevertArgs = "/setactive " + PowerPlans.SchemeBalanced;
+            highPerf.Probe = delegate
+            {
+                Shell.Result r = Shell.Run("powercfg.exe", "/getactivescheme", 15000);
+                return r.All.IndexOf(PowerPlans.SchemeHighPerformance, StringComparison.OrdinalIgnoreCase) >= 0;
+            };
+            // 还原要回到"你原来用的那个计划"而不是固定回平衡：
+            // 应用前抓下当前计划 GUID，还原时按它恢复（原先是写死 /setactive 平衡）。
+            highPerf.CaptureOriginal = delegate { return PowerCfg.ActiveScheme(); };
+            highPerf.RestoreOriginal = delegate (string guid)
+            {
+                if (string.IsNullOrEmpty(guid)) return false;
+                return Shell.Run("powercfg.exe", "/setactive " + guid, 15000, null, true).Ok;
+            };
+            list.Add(highPerf);
+
+            // 快速启动走 RegTweak 而非 reg.exe 直写：只有 RegTweak 会进 RegHelper 备份链，
+            // 还原时才能写回系统原值；硬编码还原成 1 会丢掉原值。
+            var fastBoot = RegTweak.Create("disable_fast_startup", GPower,
+                "关闭快速启动",
+                "避免快速启动导致的部分驱动异常、双系统时间错误等问题。与「关闭休眠」相互独立，可单独开关。",
+                risky: true, adminOnly: true);
+            fastBoot.Enable.Add(RegWrite.Dword(RegistryHive.LocalMachine,
+                @"SYSTEM\CurrentControlSet\Control\Session Manager\Power", "HiberbootEnabled", 0));
+            list.Add(fastBoot);
+
+            CommandTweak ultimate = new CommandTweak();
+            ultimate.IdValue = "ultimate_perf";
+            ultimate.GroupValue = GPower;
+            ultimate.NameValue = "启用终极性能电源计划";
+            ultimate.DescriptionValue = "终极性能计划移除节能节流与小核调度延迟，适合追求极限性能的高端台式机（笔记本/家用慎用）。";
+            ultimate.RiskyValue = true;
+            ultimate.EnableFile = "cmd.exe";
+            ultimate.EnableArgs = "/c powercfg /duplicatescheme " + PowerPlans.SchemeUltimate + " && powercfg /setactive " + PowerPlans.SchemeUltimate;
+            ultimate.RevertFile = "powercfg.exe";
+            ultimate.RevertArgs = "/setactive " + PowerPlans.SchemeBalanced;
+            ultimate.Probe = delegate
+            {
+                Shell.Result r = Shell.Run("powercfg.exe", "/getactivescheme", 15000);
+                return r.All.IndexOf(PowerPlans.SchemeUltimate, StringComparison.OrdinalIgnoreCase) >= 0;
+            };
+            list.Add(ultimate);
 
             return list;
         }

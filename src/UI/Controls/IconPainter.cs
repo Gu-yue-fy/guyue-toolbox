@@ -1,4 +1,9 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：矢量图标绘制（不依赖图标字体或图片资源）
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 
@@ -21,6 +26,11 @@ namespace GuyueBox.UI
             float left = r.X + (r.Width - size) / 2f;
             float top = r.Y + (r.Height - size) / 2f;
             RectangleF box = new RectangleF(left, top, size, size);
+
+            // 统一留白：图标在画布内四周留出一致空白，不贴边、更精致透气。
+            // 从入口统一收缩，全部图标自动受益，无需逐个 case 调整（零回归）。
+            float pad = size * 0.12f;
+            box = new RectangleF(box.Left + pad, box.Top + pad, box.Width - pad * 2, box.Height - pad * 2);
 
             // 画笔与画刷走全局缓存，避免每次绘制都创建 GDI 对象
             Pen pen = GdiCache.RoundPen(color, Math.Max(1.6f, size / 11f));
@@ -67,19 +77,24 @@ namespace GuyueBox.UI
                         case "stop": DrawStop(g, brush, box); break;
                         case "services": DrawServices(g, pen, box); break;
                         case "clock": DrawClock(g, pen, box); break;
-                        case "lock": DrawLock(g, pen, brush, box); break;
                         case "power": DrawPower(g, pen, box); break;
                         case "menu": DrawMenu(g, pen, box); break;
                         case "task": DrawTask(g, pen, box); break;
                         case "gauge": DrawGauge(g, pen, box); break;
-                        case "user": DrawUser(g, pen, box); break;
-                        case "edit": DrawEdit(g, pen, box); break;
                         case "warn": DrawWarn(g, pen, box); break;
-                        case "code": DrawCode(g, pen, box); break;
                         case "copy": DrawCopy(g, pen, box); break;
                         case "save": DrawSave(g, pen, box); break;
                         case "sort": DrawSort(g, pen, box); break;
                         case "undo": DrawUndo(g, pen, box); break;
+                        case "device": DrawDevice(g, pen, box); break;
+                        case "pc": DrawPc(g, pen, brush, box); break;
+                        case "unlock": DrawUnlock(g, pen, box); break;
+                        case "maint": DrawMaint(g, pen, box); break;
+                        case "gpu": DrawGpu(g, pen, box); break;
+                        case "ban": DrawBan(g, pen, box); break;
+                        case "minus": DrawMinus(g, pen, box); break;
+                        case "theme": DrawTheme(g, pen, brush, box); break;
+                        case "gear": DrawGear(g, pen, box); break;
                     default:
                         // 未知图标名：画一个中性占位圆，而不是静默留白。
                         // 这样即使以后写错图标名，也能一眼看出"这里少了个图标"，而不是看起来像没设计
@@ -129,7 +144,7 @@ namespace GuyueBox.UI
                     new PointF(b.Left + b.Width * 0.66f, b.Top + b.Height * 0.90f),
                     new PointF(b.Left + b.Width * 0.36f, b.Bottom)
                 });
-                using (SolidBrush br = new SolidBrush(Color.FromArgb(90, pen.Color)))
+                SolidBrush br = GdiCache.Brush(Color.FromArgb(90, pen.Color));
                 {
                     g.FillPath(br, p);
                 }
@@ -167,7 +182,7 @@ namespace GuyueBox.UI
             float rad = b.Width * 0.28f;
 
             // 齿轮：外圈 + 8 个齿 + 中心孔
-            using (Pen tooth = new Pen(pen.Color, pen.Width * 1.5f))
+            Pen tooth = GdiCache.RoundPen(pen.Color, pen.Width * 1.5f);
             {
                 tooth.StartCap = LineCap.Round;
                 tooth.EndCap = LineCap.Round;
@@ -183,7 +198,7 @@ namespace GuyueBox.UI
             }
 
             g.DrawEllipse(pen, cx - rad, cy - rad, rad * 2, rad * 2);
-            using (SolidBrush br = new SolidBrush(pen.Color))
+            SolidBrush br = GdiCache.Brush(pen.Color);
             {
                 g.FillEllipse(br, cx - rad * 0.36f, cy - rad * 0.36f, rad * 0.72f, rad * 0.72f);
             }
@@ -197,7 +212,7 @@ namespace GuyueBox.UI
                 float radius = b.Width * (0.16f + i * 0.20f);
                 g.DrawArc(pen, cx - radius, b.Top + b.Height * 0.34f - radius, radius * 2, radius * 2, 205, 130);
             }
-            using (SolidBrush br = new SolidBrush(pen.Color))
+            SolidBrush br = GdiCache.Brush(pen.Color);
             {
                 g.FillEllipse(br, cx - b.Width * 0.07f, b.Top + b.Height * 0.76f, b.Width * 0.14f, b.Height * 0.14f);
             }
@@ -241,7 +256,7 @@ namespace GuyueBox.UI
         private static void DrawImage(Graphics g, Pen pen, Brush brush, RectangleF b)
         {
             g.DrawRectangle(pen, b.Left, b.Top + b.Height * 0.12f, b.Width, b.Height * 0.76f);
-            using (SolidBrush br = new SolidBrush(Color.FromArgb(90, pen.Color)))
+            SolidBrush br = GdiCache.Brush(Color.FromArgb(90, pen.Color));
             {
                 g.FillEllipse(br, b.Left + b.Width * 0.16f, b.Top + b.Height * 0.24f, b.Width * 0.18f, b.Height * 0.18f);
             }
@@ -385,7 +400,7 @@ namespace GuyueBox.UI
                     new PointF(b.Left, b.Top + b.Height * 0.58f),
                     new PointF(b.Left, b.Top + b.Height * 0.20f)
                 });
-                using (SolidBrush br = new SolidBrush(Color.FromArgb(70, pen.Color)))
+                SolidBrush br = GdiCache.Brush(Color.FromArgb(70, pen.Color));
                 {
                     g.FillPath(br, p);
                 }
@@ -438,6 +453,72 @@ namespace GuyueBox.UI
             }
         }
 
+        /// <summary>设置：齿轮（外圈齿 + 中心孔）。</summary>
+        private static void DrawGear(Graphics g, Pen pen, RectangleF b)
+        {
+            float cx = b.Left + b.Width * 0.5f;
+            float cy = b.Top + b.Height * 0.5f;
+            float ro = b.Width * 0.46f;
+            float ri = b.Width * 0.30f;
+            g.DrawEllipse(pen, cx - ri, cy - ri, ri * 2, ri * 2);
+            for (int i = 0; i < 8; i++)
+            {
+                double a = Math.PI * 2 * i / 8;
+                float x1 = cx + (float)(Math.Cos(a) * ri * 1.05);
+                float y1 = cy + (float)(Math.Sin(a) * ri * 1.05);
+                float x2 = cx + (float)(Math.Cos(a) * ro);
+                float y2 = cy + (float)(Math.Sin(a) * ro);
+                g.DrawLine(pen, x1, y1, x2, y2);
+            }
+        }
+
+        /// <summary>显卡：卡身 + 双风扇（与 cpu 的方芯片明显区分）。</summary>
+        private static void DrawGpu(Graphics g, Pen pen, RectangleF b)
+        {
+            float x = b.Left + b.Width * 0.08f;
+            float y = b.Top + b.Height * 0.24f;
+            float w = b.Width * 0.80f;
+            float h = b.Height * 0.54f;
+            Gfx.StrokeRound(g, new Rectangle((int)Math.Round(x), (int)Math.Round(y),
+                Math.Max(1, (int)Math.Round(w)), Math.Max(1, (int)Math.Round(h))), 3, pen.Color, pen.Width);
+            float r = h * 0.30f;
+            float cy = y + h * 0.5f;
+            g.DrawEllipse(pen, x + w * 0.31f - r, cy - r, r * 2, r * 2);
+            g.DrawEllipse(pen, x + w * 0.69f - r, cy - r, r * 2, r * 2);
+        }
+
+        /// <summary>禁用：圆圈 + 斜杠（“禁止”通用语义）。</summary>
+        private static void DrawBan(Graphics g, Pen pen, RectangleF b)
+        {
+            float cx = b.Left + b.Width * 0.5f;
+            float cy = b.Top + b.Height * 0.5f;
+            float r = b.Width * 0.44f;
+            g.DrawEllipse(pen, cx - r, cy - r, r * 2, r * 2);
+            float d = r * 0.66f;
+            g.DrawLine(pen, cx - d, cy + d, cx + d, cy - d);
+        }
+
+        /// <summary>移除：一条短横（从列表里拿掉，语义比 × 更准）。</summary>
+        private static void DrawMinus(Graphics g, Pen pen, RectangleF b)
+        {
+            float y = b.Top + b.Height * 0.5f;
+            g.DrawLine(pen, b.Left + b.Width * 0.16f, y, b.Right - b.Width * 0.16f, y);
+        }
+
+        /// <summary>主题：左半实心的圆（明/暗切换的通用符号）。</summary>
+        private static void DrawTheme(Graphics g, Pen pen, Brush brush, RectangleF b)
+        {
+            float cx = b.Left + b.Width * 0.5f;
+            float cy = b.Top + b.Height * 0.5f;
+            float r = b.Width * 0.42f;
+            g.DrawEllipse(pen, cx - r, cy - r, r * 2, r * 2);
+            using (GraphicsPath p = new GraphicsPath())
+            {
+                p.AddPie(cx - r, cy - r, r * 2, r * 2, 90, 180);
+                g.FillPath(brush, p);
+            }
+        }
+
         private static void DrawMemory(Graphics g, Pen pen, RectangleF b)
         {
             g.DrawRectangle(pen, b.Left, b.Top + b.Height * 0.22f, b.Width, b.Height * 0.56f);
@@ -476,7 +557,76 @@ namespace GuyueBox.UI
             Gfx.StrokeRound(g, ToRect(right, bottom, s), 3, pen.Color, pen.Width);
         }
 
-        private static void DrawSearch(Graphics g, Pen pen, RectangleF b)
+        /// <summary>设备：显示器轮廓 + 底座（设备管理器语义，与 pc 的机箱轮廓区分）。</summary>
+        private static void DrawDevice(Graphics g, Pen pen, RectangleF b)
+        {
+            int w = (int)Math.Round(b.Width * 0.88f);
+            int h = (int)Math.Round(b.Height * 0.60f);
+            int x = (int)Math.Round(b.Left + (b.Width - w) / 2f);
+            int y = (int)Math.Round(b.Top + b.Height * 0.08f);
+            Gfx.StrokeRound(g, new Rectangle(x, y, w, h), 2, pen.Color, pen.Width);
+
+            float cx = b.Left + b.Width * 0.5f;
+            float footY = b.Top + b.Height * 0.86f;
+            g.DrawLine(pen, cx, y + h, cx, footY);
+            g.DrawLine(pen, cx - w * 0.30f, footY, cx + w * 0.30f, footY);
+        }
+
+        /// <summary>PC 主机箱：竖立塔式轮廓 + 面板横线与电源点（系统信息语义）。</summary>
+        private static void DrawPc(Graphics g, Pen pen, Brush brush, RectangleF b)
+        {
+            int w = (int)Math.Round(b.Width * 0.62f);
+            int h = (int)Math.Round(b.Height * 0.92f);
+            int x = (int)Math.Round(b.Left + (b.Width - w) / 2f);
+            int y = (int)Math.Round(b.Top + b.Height * 0.04f);
+            Gfx.StrokeRound(g, new Rectangle(x, y, w, h), 3, pen.Color, pen.Width);
+
+            g.DrawLine(pen, x + w * 0.20f, y + h * 0.26f, x + w * 0.80f, y + h * 0.26f);
+            g.DrawLine(pen, x + w * 0.20f, y + h * 0.42f, x + w * 0.80f, y + h * 0.42f);
+            float dot = b.Width * 0.11f;
+            g.FillEllipse(brush, x + w * 0.36f, y + h * 0.62f, dot, dot);
+        }
+
+        /// <summary>解锁：挂锁锁体 + 向右开启的锁梁（解除占用语义）。</summary>
+        private static void DrawUnlock(Graphics g, Pen pen, RectangleF b)
+        {
+            int w = (int)Math.Round(b.Width * 0.76f);
+            int h = (int)Math.Round(b.Height * 0.44f);
+            int x = (int)Math.Round(b.Left + (b.Width - w) / 2f);
+            int y = (int)Math.Round(b.Top + b.Height * 0.50f);
+            Gfx.StrokeRound(g, new Rectangle(x, y, w, h), 2, pen.Color, pen.Width);
+
+            // 锁梁：左侧立柱 + 顶部横梁，右端留出开口（表示已开启）
+            float post = x + w * 0.24f;
+            float arch = y - b.Height * 0.32f;
+            float end = x + w * 0.82f;
+            g.DrawLine(pen, post, y, post, arch);
+            g.DrawLine(pen, post, arch, end, arch);
+            g.DrawLine(pen, end, arch, end, arch + b.Height * 0.12f);
+
+            // 锁孔
+            g.DrawLine(pen, x + w * 0.5f, y + h * 0.32f, x + w * 0.5f, y + h * 0.68f);
+        }
+
+        /// <summary>系统维护：斜置扳手（两端开口）。</summary>
+        private static void DrawMaint(Graphics g, Pen pen, RectangleF b)
+        {
+            float cx = b.Left + b.Width * 0.5f;
+            float cy = b.Top + b.Height * 0.5f;
+            float len = b.Width * 0.60f;
+            double ang = Math.PI * 0.20;
+            float dx = (float)(Math.Cos(ang) * len / 2);
+            float dy = (float)(Math.Sin(ang) * len / 2);
+            g.DrawLine(pen, cx - dx, cy - dy, cx + dx, cy + dy);
+            float hx = b.Width * 0.17f;
+            float hy = b.Height * 0.17f;
+            g.DrawLine(pen, cx - dx - hx, cy - dy + hy, cx - dx, cy - dy);
+            g.DrawLine(pen, cx - dx + hx, cy - dy - hy, cx - dx, cy - dy);
+            g.DrawLine(pen, cx + dx - hx, cy + dy + hy, cx + dx, cy + dy);
+            g.DrawLine(pen, cx + dx + hx, cy + dy - hy, cx + dx, cy + dy);
+            }
+
+            private static void DrawSearch(Graphics g, Pen pen, RectangleF b)
         {
             float cx = b.Left + b.Width * 0.42f;
             float cy = b.Top + b.Height * 0.42f;
@@ -511,7 +661,7 @@ namespace GuyueBox.UI
             float cx = b.Left + b.Width * 0.46f;
             float cy = b.Top + b.Height * 0.5f;
             float s = b.Height * 0.30f;
-            using (SolidBrush br = new SolidBrush(pen.Color))
+            SolidBrush br = GdiCache.Brush(pen.Color);
             {
                 g.FillPolygon(br, new PointF[]
                 {
@@ -536,7 +686,7 @@ namespace GuyueBox.UI
             float cy = b.Top + b.Height * 0.5f;
             float step = b.Width * 0.26f;
             float r = b.Width * 0.07f;
-            using (SolidBrush br = new SolidBrush(pen.Color))
+            SolidBrush br = GdiCache.Brush(pen.Color);
             {
                 for (int i = -1; i <= 1; i++)
                 {
@@ -559,7 +709,7 @@ namespace GuyueBox.UI
             g.DrawLine(pen, x, y1, x + w, y1);
             g.DrawLine(pen, x, y2, x + w, y2);
             g.DrawLine(pen, x, y3, x + w, y3);
-            using (SolidBrush br = new SolidBrush(pen.Color))
+            SolidBrush br = GdiCache.Brush(pen.Color);
             {
                 float d = b.Width * 0.10f;
                 g.FillRectangle(br, x - d, y1 - t, d, t * 2);
@@ -584,7 +734,7 @@ namespace GuyueBox.UI
             float lineY2 = y + h * 0.62f;
             g.DrawRectangle(pen, boxX, lineY2 - boxS * 0.5f, boxS, boxS);
             g.DrawLine(pen, x + w * 0.42f, lineY2, x + w * 0.82f, lineY2);
-            using (SolidBrush br = new SolidBrush(pen.Color))
+            SolidBrush br = GdiCache.Brush(pen.Color);
             {
                 g.FillEllipse(br, boxX, lineY - boxS * 0.5f, boxS, boxS);
             }
@@ -595,7 +745,7 @@ namespace GuyueBox.UI
             float cx = b.Left + b.Width * 0.5f;
             float cy = b.Top + b.Height * 0.58f;
             float r = b.Width * 0.34f;
-            using (Pen p = new Pen(pen.Color, Math.Max(1.6f, pen.Width * 1.2f)))
+            Pen p = GdiCache.Pen(pen.Color, Math.Max(1.6f, pen.Width * 1.2f));
             {
                 g.DrawArc(p, cx - r, cy - r, r * 2, r * 2, 180, 180);
                 g.DrawLine(p, cx - r * 0.5f, cy + r * 0.55f, cx + r * 0.5f, cy + r * 0.55f);
@@ -604,41 +754,10 @@ namespace GuyueBox.UI
             g.DrawLine(pen, cx, cy - r * 0.1f, cx, cy + r * 0.1f);
         }
 
-        private static void DrawUser(Graphics g, Pen pen, RectangleF b)
-        {
-            // 人形：头 + 肩
-            float cx = b.Left + b.Width * 0.5f;
-            float headR = b.Width * 0.19f;
-            float headCy = b.Top + b.Height * 0.30f;
-            g.DrawEllipse(pen, cx - headR, headCy - headR, headR * 2, headR * 2);
-            using (Pen p = new Pen(pen.Color, Math.Max(1.6f, pen.Width * 1.2f)))
-            {
-                g.DrawArc(p,
-                    b.Left + b.Width * 0.14f, b.Top + b.Height * 0.55f,
-                    b.Width * 0.72f, b.Height * 0.52f, 180, 180);
-            }
-        }
-
-        private static void DrawEdit(Graphics g, Pen pen, RectangleF b)
-        {
-            // 铅笔：斜杆 + 笔尖
-            float x1 = b.Left + b.Width * 0.72f;
-            float y1 = b.Top + b.Height * 0.16f;
-            float x2 = b.Left + b.Width * 0.30f;
-            float y2 = b.Top + b.Height * 0.72f;
-            using (Pen p = new Pen(pen.Color, Math.Max(1.6f, pen.Width * 1.3f)))
-            {
-                g.DrawLine(p, x1, y1, x2, y2);
-            }
-            g.DrawLine(pen, x2, y2, b.Left + b.Width * 0.22f, b.Bottom - b.Height * 0.14f);
-            g.DrawLine(pen, b.Left + b.Width * 0.22f, b.Bottom - b.Height * 0.14f, x2 + b.Width * 0.13f, y2 - b.Height * 0.05f);
-            g.DrawLine(pen, x1 - b.Width * 0.06f, y1 + b.Height * 0.05f, x1 + b.Width * 0.12f, y1 + b.Height * 0.18f);
-        }
-
         private static void DrawWarn(Graphics g, Pen pen, RectangleF b)
         {
             // 警告三角 + 叹号
-            using (Pen p = new Pen(pen.Color, Math.Max(1.6f, pen.Width * 1.2f)))
+            Pen p = GdiCache.Pen(pen.Color, Math.Max(1.6f, pen.Width * 1.2f));
             using (GraphicsPath path = new GraphicsPath())
             {
                 path.AddPolygon(new PointF[]
@@ -672,7 +791,7 @@ namespace GuyueBox.UI
 
         private static void DrawStop(Graphics g, Brush brush, RectangleF b)
         {
-            using (SolidBrush br = new SolidBrush(penColor(brush)))
+            SolidBrush br = GdiCache.Brush(penColor(brush));
             {
                 float s = b.Width * 0.28f;
                 g.FillRectangle(br, b.Left + b.Width * 0.5f - s, b.Top + b.Height * 0.5f - s, s * 2, s * 2);
@@ -691,7 +810,7 @@ namespace GuyueBox.UI
             float cy = b.Top + b.Height * 0.5f;
             float rad = b.Width * 0.22f;
             g.DrawEllipse(pen, cx - rad, cy - rad, rad * 2, rad * 2);
-            using (Pen tooth = new Pen(pen.Color, pen.Width * 1.4f))
+            Pen tooth = GdiCache.RoundPen(pen.Color, pen.Width * 1.4f);
             {
                 tooth.StartCap = LineCap.Round;
                 tooth.EndCap = LineCap.Round;
@@ -705,16 +824,10 @@ namespace GuyueBox.UI
                     g.DrawLine(tooth, x1, y1, x2, y2);
                 }
             }
-            using (SolidBrush br = new SolidBrush(pen.Color))
+            SolidBrush br = GdiCache.Brush(pen.Color);
             {
                 g.FillEllipse(br, cx - rad * 0.34f, cy - rad * 0.34f, rad * 0.68f, rad * 0.68f);
             }
-        }
-
-        private static void DrawLock(Graphics g, Pen pen, Brush brush, RectangleF b)
-        {
-            g.DrawArc(pen, b.Left + b.Width * 0.24f, b.Top, b.Width * 0.52f, b.Height * 0.62f, 180, 180);
-            g.FillRectangle(brush, b.Left + b.Width * 0.14f, b.Top + b.Height * 0.46f, b.Width * 0.72f, b.Height * 0.54f);
         }
 
         private static void DrawPower(Graphics g, Pen pen, RectangleF b)
@@ -724,23 +837,6 @@ namespace GuyueBox.UI
             float r = b.Width * 0.44f;
             g.DrawArc(pen, cx - r, cy - r, r * 2, r * 2, -60, 300);
             g.DrawLine(pen, cx, b.Top, cx, cy - r * 0.10f);
-        }
-
-        private static void DrawCode(Graphics g, Pen pen, RectangleF b)
-        {
-            // 左尖括号 <
-            g.DrawLine(pen, b.Left + b.Width * 0.32f, b.Top + b.Height * 0.30f,
-                b.Left + b.Width * 0.16f, b.Top + b.Height * 0.50f);
-            g.DrawLine(pen, b.Left + b.Width * 0.16f, b.Top + b.Height * 0.50f,
-                b.Left + b.Width * 0.32f, b.Top + b.Height * 0.70f);
-            // 右尖括号 >
-            g.DrawLine(pen, b.Right - b.Width * 0.32f, b.Top + b.Height * 0.30f,
-                b.Right - b.Width * 0.16f, b.Top + b.Height * 0.50f);
-            g.DrawLine(pen, b.Right - b.Width * 0.16f, b.Top + b.Height * 0.50f,
-                b.Right - b.Width * 0.32f, b.Top + b.Height * 0.70f);
-            // 中间斜杠 /
-            g.DrawLine(pen, b.Left + b.Width * 0.46f, b.Top + b.Height * 0.74f,
-                b.Right - b.Width * 0.46f, b.Top + b.Height * 0.26f);
         }
 
         private static void DrawCopy(Graphics g, Pen pen, RectangleF b)

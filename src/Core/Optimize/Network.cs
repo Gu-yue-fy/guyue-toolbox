@@ -1,7 +1,7 @@
-﻿using System;
+/* 文件说明：网络类优化项：Nagle、DSCP、网卡省电与高级参数。 */
+
+using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Globalization;
 using System.IO;
 using System.Net.NetworkInformation;
 using Microsoft.Win32;
@@ -130,7 +130,6 @@ namespace GuyueBox.Core
             return RegHelper.Restore(Id);
         }
     }
-
     /// <summary>
     /// 游戏 DSCP 46（EF 加速转发）QoS 标记。
     /// 为选定的游戏 exe 写入 QoS 策略（HKLM\...\QoS），出站包打 DSCP 46 标记，
@@ -243,7 +242,6 @@ namespace GuyueBox.Core
             return RunScript(RevertScript);
         }
     }
-
     /// <summary>
     /// 逐个网卡（网络适配器类驱动子键）关闭省电特性：节能以太网、选择性暂停、
     /// 关机降速、电源节省模式等，消除竞技游戏中网卡省电导致的延迟抖动。
@@ -365,9 +363,8 @@ namespace GuyueBox.Core
             return RegHelper.Restore(Id);
         }
     }
-
     // ===================================================================
-    // 网卡高级属性（动态：每个驱动暴露的关键字逐一处理，与 NIC调整.bat 同思路）
+    // 网卡高级属性（动态：每个驱动暴露的关键字逐一处理）
     // ===================================================================
 
     public sealed class NicAdvancedTweak : ITweak
@@ -533,7 +530,6 @@ namespace GuyueBox.Core
             return RegHelper.Restore(_id);
         }
     }
-
     /// <summary>
     /// netsh 类优化项：apply/revert 走命令，probe 解析 show 输出（中英双语，
     /// 通过 chcp 65001 强制 UTF-8 输出避免乱码）。
@@ -583,7 +579,7 @@ namespace GuyueBox.Core
         {
             for (int i = 0; i < _apply.Length; i++)
             {
-                Shell.Result r = Shell.Netsh(_apply[i]);
+                Shell.Result r = Shell.Netsh(_apply[i], true);
                 if (!r.Ok) return false;
             }
             return true;
@@ -594,12 +590,11 @@ namespace GuyueBox.Core
             bool ok = true;
             for (int i = 0; i < _revert.Length; i++)
             {
-                if (!Shell.Netsh(_revert[i]).Ok) ok = false;
+                if (!Shell.Netsh(_revert[i], true).Ok) ok = false;
             }
             return ok;
         }
     }
-
     /// <summary>
     /// 网络协议栈精简：对全部网卡禁用非必要协议绑定（LLDP / LLTDIO / IP Helper /
     /// 响应程序 / SMB 服务端与客户端），减少后台广播与协议处理。走 PowerShell NetAdapter Binding。

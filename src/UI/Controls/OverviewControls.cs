@@ -1,4 +1,9 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：概览页控件：区块标题与指标带
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
@@ -61,7 +66,7 @@ namespace GuyueBox.UI
 
             // 4px 强调竖条（与标题首行等高）：自上而下由实到虚 + 背后一层柔光。
             // 平涂的小色块在深色底上几乎没有存在感，渐变+光晕才让它成为"层级标记"。
-            using (SolidBrush halo = new SolidBrush(Gfx.Alpha(_tone, 28)))
+            SolidBrush halo = GdiCache.Brush(Gfx.Alpha(_tone, 28));
             {
                 g.FillRectangle(halo, -2, 2, 8, 24);
             }
@@ -90,7 +95,6 @@ namespace GuyueBox.UI
             }
         }
     }
-
     /// <summary>
     /// 数据带，对齐设计 OverviewPage 的「数据带」：
     /// 一个圆角容器内**等分若干格**，格与格之间用 1px 竖线分隔（不是各自独立的卡片）。

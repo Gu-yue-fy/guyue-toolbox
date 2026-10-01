@@ -1,4 +1,9 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：电源计划枚举/激活/终极性能确保（方案 GUID 的唯一来源）
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -14,6 +19,11 @@ namespace GuyueBox.Core
 
     public static class PowerPlans
     {
+        // 电源方案 GUID 的唯一来源：电源计划页与优化项目录共用同一份常量，
+        // 避免同一串 GUID 在两处硬编码（写错一处就会出现"点了没反应"）
+        public const string SchemeHighPerformance = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c";
+        public const string SchemeBalanced = "381b4222-f694-41f0-9685-ff5bb260df2e";
+        /// <summary>「终极性能」：默认隐藏，需 /duplicatescheme 或直接 /setactive 才生效。</summary>
         public const string SchemeUltimate = "e9a42b02-d5df-448d-aa00-03f14749eb61";
 
         public static List<PowerPlan> List()
@@ -54,7 +64,7 @@ namespace GuyueBox.Core
             error = "";
             try
             {
-                Shell.Result r = Shell.Run("powercfg.exe", "/setactive " + guid, 20000);
+                Shell.Result r = Shell.Run("powercfg.exe", "/setactive " + guid, 20000, isChange: true);
                 if (!r.Ok) { error = r.All.Trim(); return false; }
                 return true;
             }
@@ -65,28 +75,5 @@ namespace GuyueBox.Core
             }
         }
 
-        /// <summary>确保存在“终极性能”计划（不存在则克隆高性能），并激活它。</summary>
-        public static bool EnsureUltimate(out string error)
-        {
-            error = "";
-            try
-            {
-                string target = SchemeUltimate; // 预置了终极性能的系统直接激活官方 GUID
-                Shell.Result dup = Shell.Run("powercfg.exe", "/duplicatescheme " + SchemeUltimate, 20000);
-                if (dup.Ok)
-                {
-                    Match m = Regex.Match(dup.All, @"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}");
-                    if (m.Success) target = m.Value; // 克隆成功：激活克隆出的新实例（原代码丢弃了新 GUID）
-                }
-                Shell.Result act = Shell.Run("powercfg.exe", "/setactive " + target, 20000);
-                if (!act.Ok) { error = act.All.Trim(); return false; }
-                return true;
-            }
-            catch (Exception ex)
-            {
-                error = ex.Message;
-                return false;
-            }
-        }
     }
 }

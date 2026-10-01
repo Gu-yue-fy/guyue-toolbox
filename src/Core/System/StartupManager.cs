@@ -1,4 +1,9 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：启动项读写：Run 项与 StartupApproved 状态
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
@@ -65,7 +70,6 @@ namespace GuyueBox.Core
             }
         }
     }
-
     /// <summary>
     /// 读取与切换 Windows 启动项。
     /// 启用/禁用使用系统自身的 StartupApproved 机制（与任务管理器"启动"选项卡一致）。
@@ -88,13 +92,13 @@ namespace GuyueBox.Core
             // 结果与串行一致（最终仍按「启用优先 + 名称」统一排序）
             Func<List<StartupItem>>[] readers = new Func<List<StartupItem>>[]
             {
-                delegate { List<StartupItem> l = new List<StartupItem>(); ReadRegistryRun(l, RegistryHive.LocalMachine, RegistryView.Registry64, RunKey, StartupSource.RegistryRun, ApprovedRun); return l; },
-                delegate { List<StartupItem> l = new List<StartupItem>(); ReadRegistryRun(l, RegistryHive.LocalMachine, RegistryView.Registry32, Run32Key, StartupSource.RegistryRun, ApprovedRun32); return l; },
-                delegate { List<StartupItem> l = new List<StartupItem>(); ReadRegistryRun(l, RegistryHive.CurrentUser, RegistryView.Registry64, RunKey, StartupSource.RegistryRun, ApprovedRun); return l; },
-                delegate { List<StartupItem> l = new List<StartupItem>(); ReadRegistryRun(l, RegistryHive.CurrentUser, RegistryView.Registry64, RunOnceKey, StartupSource.RegistryRunOnce, ApprovedRunOnce); return l; },
-                delegate { List<StartupItem> l = new List<StartupItem>(); ReadRegistryRun(l, RegistryHive.CurrentUser, RegistryView.Registry32, RunOnce32Key, StartupSource.RegistryRunOnce, ApprovedRunOnce); return l; },
-                delegate { List<StartupItem> l = new List<StartupItem>(); ReadStartupFolder(l, Environment.SpecialFolder.Startup, "用户启动文件夹"); return l; },
-                delegate { List<StartupItem> l = new List<StartupItem>(); ReadStartupFolder(l, Environment.SpecialFolder.CommonStartup, "公共启动文件夹"); return l; }
+                ReadHklm64Run,           // HKLM\...\Run（64 位视图）
+                ReadHklm32Run,           // HKLM\...\Run（32 位视图）
+                ReadHkcuRun,             // HKCU\...\Run
+                ReadHkcuRunOnce,         // HKCU\...\RunOnce
+                ReadHkcu32RunOnce,       // HKCU\...\RunOnce（32 位视图）
+                ReadUserStartupFolder,   // 当前用户启动文件夹
+                ReadCommonStartupFolder  // 公共启动文件夹
             };
 
             List<StartupItem>[] parts = new List<StartupItem>[readers.Length];
@@ -114,6 +118,57 @@ namespace GuyueBox.Core
                 return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
             });
             return list;
+        }
+
+        // ---- 7 个并行读取器：各自写自己的列表，由 Load() 按原顺序合并 ----
+
+        private static List<StartupItem> ReadHklm64Run()
+        {
+            List<StartupItem> l = new List<StartupItem>();
+            ReadRegistryRun(l, RegistryHive.LocalMachine, RegistryView.Registry64, RunKey, StartupSource.RegistryRun, ApprovedRun);
+            return l;
+        }
+
+        private static List<StartupItem> ReadHklm32Run()
+        {
+            List<StartupItem> l = new List<StartupItem>();
+            ReadRegistryRun(l, RegistryHive.LocalMachine, RegistryView.Registry32, Run32Key, StartupSource.RegistryRun, ApprovedRun32);
+            return l;
+        }
+
+        private static List<StartupItem> ReadHkcuRun()
+        {
+            List<StartupItem> l = new List<StartupItem>();
+            ReadRegistryRun(l, RegistryHive.CurrentUser, RegistryView.Registry64, RunKey, StartupSource.RegistryRun, ApprovedRun);
+            return l;
+        }
+
+        private static List<StartupItem> ReadHkcuRunOnce()
+        {
+            List<StartupItem> l = new List<StartupItem>();
+            ReadRegistryRun(l, RegistryHive.CurrentUser, RegistryView.Registry64, RunOnceKey, StartupSource.RegistryRunOnce, ApprovedRunOnce);
+            return l;
+        }
+
+        private static List<StartupItem> ReadHkcu32RunOnce()
+        {
+            List<StartupItem> l = new List<StartupItem>();
+            ReadRegistryRun(l, RegistryHive.CurrentUser, RegistryView.Registry32, RunOnce32Key, StartupSource.RegistryRunOnce, ApprovedRunOnce);
+            return l;
+        }
+
+        private static List<StartupItem> ReadUserStartupFolder()
+        {
+            List<StartupItem> l = new List<StartupItem>();
+            ReadStartupFolder(l, Environment.SpecialFolder.Startup, "用户启动文件夹");
+            return l;
+        }
+
+        private static List<StartupItem> ReadCommonStartupFolder()
+        {
+            List<StartupItem> l = new List<StartupItem>();
+            ReadStartupFolder(l, Environment.SpecialFolder.CommonStartup, "公共启动文件夹");
+            return l;
         }
 
         private static void ReadRegistryRun(List<StartupItem> list, RegistryHive hive, RegistryView view,
@@ -225,9 +280,18 @@ namespace GuyueBox.Core
             string approvedPath = GetApprovedPath(item);
             if (approvedPath == null) return false;
 
+            // 写入必须与读取（IsApproved，加载列表时按条目自己的 hive 读）用同一个 hive：
+            // 这里原先硬编码 HKCU，导致禁用 HKLM 启动项后一刷新勾选就弹回"已启用"——
+            // 实际只写了当前用户的键，机器级启动项根本没被禁用。
+            // 启动文件夹项没有 hive，其 StartupApproved 记录固定在当前用户下。
+            RegistryHive approvedHive = item.Source == StartupSource.StartupFolder
+                ? RegistryHive.CurrentUser : item.Hive;
+            RegistryView approvedView = item.Source == StartupSource.StartupFolder
+                ? RegistryView.Registry64 : item.View;
+
             try
             {
-                using (RegistryKey baseKey = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Registry64))
+                using (RegistryKey baseKey = RegistryKey.OpenBaseKey(approvedHive, approvedView))
                 using (RegistryKey key = baseKey.CreateSubKey(approvedPath))
                 {
                     if (key == null) return false;
@@ -288,13 +352,17 @@ namespace GuyueBox.Core
                     }
                 }
 
-                // 同时清理 StartupApproved 记录
+                // 同时清理 StartupApproved 记录（hive 与读取保持一致：HKLM 项清 HKLM 下的记录）
                 string approvedPath = GetApprovedPath(item);
                 if (approvedPath != null)
                 {
                     try
                     {
-                        using (RegistryKey baseKey = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Registry64))
+                        RegistryHive approvedHive = item.Source == StartupSource.StartupFolder
+                            ? RegistryHive.CurrentUser : item.Hive;
+                        RegistryView approvedView = item.Source == StartupSource.StartupFolder
+                            ? RegistryView.Registry64 : item.View;
+                        using (RegistryKey baseKey = RegistryKey.OpenBaseKey(approvedHive, approvedView))
                         using (RegistryKey key = baseKey.OpenSubKey(approvedPath, true))
                         {
                             if (key != null) key.DeleteValue(item.ApprovedName, false);

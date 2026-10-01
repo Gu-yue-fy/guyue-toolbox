@@ -1,4 +1,9 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：进程枚举与操作：终止（含 taskkill 回退）、亲和性、优先级
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -28,7 +33,6 @@ namespace GuyueBox.Core
             get { return CpuPercent.ToString("0.0") + " %"; }
         }
     }
-
     /// <summary>
     /// 进程枚举与终止。CPU 占用通过两次采样差值计算，因此需保持同一个实例。
     /// </summary>
@@ -153,12 +157,12 @@ namespace GuyueBox.Core
                 }
 
                 if (wholeTree)
-                    return Shell.Run("taskkill.exe", "/PID " + pid + " /T /F", 15000).Ok;
+                    return Shell.Run("taskkill.exe", "/PID " + pid + " /T /F", 15000, isChange: true).Ok;
                 return false;
             }
             catch
             {
-                return Shell.Run("taskkill.exe", "/PID " + pid + " /F", 15000).Ok;
+                return Shell.Run("taskkill.exe", "/PID " + pid + " /F", 15000, isChange: true).Ok;
             }
         }
 
@@ -182,12 +186,6 @@ namespace GuyueBox.Core
         private const int REALTIME_PRIORITY_CLASS = 0x00000100;
 
         [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool GetProcessAffinityMask(IntPtr handle, out ulong processMask, out ulong systemMask);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool SetProcessAffinityMask(IntPtr handle, ulong mask);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool SetPriorityClass(IntPtr handle, int priorityClass);
 
         /// <summary>优先级档位文案（索引与 <see cref="SetPriority"/> 的 level 一一对应）。</summary>
@@ -204,108 +202,6 @@ namespace GuyueBox.Core
                 case 3: return ABOVE_NORMAL_PRIORITY_CLASS;
                 case 4: return HIGH_PRIORITY_CLASS;
                 default: return REALTIME_PRIORITY_CLASS;
-            }
-        }
-
-        /// <summary>本机可用的逻辑核掩码（系统亲和性）；失败返回 0。</summary>
-        public static ulong SystemAffinityMask()
-        {
-            IntPtr h = IntPtr.Zero;
-            try
-            {
-                int self = Process.GetCurrentProcess().Id;
-                h = OpenProcess(PROCESS_QUERY_INFORMATION, false, self);
-                if (h == IntPtr.Zero) return 0;
-                ulong own, system;
-                if (!GetProcessAffinityMask(h, out own, out system)) return 0;
-                return system;
-            }
-            catch
-            {
-                return 0;
-            }
-            finally
-            {
-                if (h != IntPtr.Zero) CloseHandle(h);
-            }
-        }
-
-        /// <summary>读取进程当前亲和性掩码。失败返回 0 并给出原因。</summary>
-        public static ulong GetAffinity(int pid, out string error)
-        {
-            error = "";
-            IntPtr h = IntPtr.Zero;
-            try
-            {
-                h = OpenProcess(PROCESS_QUERY_INFORMATION, false, pid);
-                if (h == IntPtr.Zero)
-                {
-                    error = "无法打开该进程（可能已退出或权限不足）。";
-                    return 0;
-                }
-                ulong own, system;
-                if (!GetProcessAffinityMask(h, out own, out system))
-                {
-                    error = "读取亲和性失败（错误码 " + Marshal.GetLastWin32Error() + "）。";
-                    return 0;
-                }
-                return own;
-            }
-            catch (Exception ex)
-            {
-                error = ex.Message;
-                return 0;
-            }
-            finally
-            {
-                if (h != IntPtr.Zero) CloseHandle(h);
-            }
-        }
-
-        /// <summary>
-        /// 设置进程亲和性。<paramref name="mask"/> 必须是当前系统掩码的子集，
-        /// 且不能为 0——0 或越界的掩码会让进程无法被调度，系统会直接拒绝。
-        /// </summary>
-        public static bool SetAffinity(int pid, ulong mask, out string error)
-        {
-            error = "";
-            if (mask == 0)
-            {
-                error = "至少要保留一个核心。";
-                return false;
-            }
-
-            ulong system = SystemAffinityMask();
-            if (system != 0 && (mask & ~system) != 0)
-            {
-                error = "选中的核心超出了本机可用范围。";
-                return false;
-            }
-
-            IntPtr h = IntPtr.Zero;
-            try
-            {
-                h = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_INFORMATION, false, pid);
-                if (h == IntPtr.Zero)
-                {
-                    error = "无法打开该进程（可能已退出或权限不足）。";
-                    return false;
-                }
-                if (!SetProcessAffinityMask(h, mask))
-                {
-                    error = "设置失败（错误码 " + Marshal.GetLastWin32Error() + "），该进程可能不允许修改。";
-                    return false;
-                }
-                return true;
-            }
-            catch (Exception ex)
-            {
-                error = ex.Message;
-                return false;
-            }
-            finally
-            {
-                if (h != IntPtr.Zero) CloseHandle(h);
             }
         }
 

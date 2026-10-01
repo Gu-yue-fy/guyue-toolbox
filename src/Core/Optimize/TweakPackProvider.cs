@@ -1,10 +1,4 @@
-/* ============================================================
- * 文件说明：外部优化包 Provider：扫描 packs 目录下的 *.json 清单，把声明式条目物化为 RegTweak，
- *           自动接入优化中心 / 一键推荐 / 方案库（无需改动既有代码）。
- *           机制：清单声明（JSON）→ 运行时操作物化。
- *           装载位置：<程序目录>\packs\*.json 与 %LOCALAPPDATA%\GuyueBox\packs\*.json
- * 项目：古月工具包（GuyueBox）
- * ============================================================ */
+/* 文件说明：外部优化包 Provider：装载程序目录与用户目录下 packs\*.json 清单，物化为 RegTweak。 */
 
 using System;
 using System.Collections.Generic;
@@ -16,16 +10,27 @@ using Microsoft.Win32;
 namespace GuyueBox.Core
 {
     /// <summary>
-    /// 优化包清单格式（JSON）：
+    /// 优化包清单格式（JSON）—— 外部扩展能力：把清单丢进 packs 目录即可扩展工具，
+    /// 不编译、不执行任何代码（只能声明注册表写入），扩展面与风险都受控。
+    ///
+    /// 包级：{ "pack": "包名", "version": "2", "author": "...", "description": "...", "enabled": true,
+    ///          "items": [ ... ] }
+    ///
+    /// 条目级（v2 新增后标 ★）：
     /// {
-    ///   "pack": "包名", "version": "1.0", "author": "...", "enabled": true,
-    ///   "items": [
-    ///     { "id": "pack_x", "group": "系统精简", "name": "标题", "desc": "说明",
-    ///       "admin": false, "risky": false, "recommended": false, "enabled": true,
-    ///       "writes": [ { "hive": "HKLM", "path": "SOFTWARE\\X", "name": "Y",
-    ///                     "kind": "dword|qword|string|expand|multistring|binary|delete",
-    ///                     "value": 1 } ] } ]
+    ///   "id": "pack_x", "group": "系统精简", "name": "标题", "desc": "说明",
+    ///   "admin": false, "risky": false, "recommended": false, "enabled": true,
+    /// ★ "when":  适用条件，不满足即"本机不适用"（不显示、不可应用）
+    ///            { "vendor": "N,A", "cpu": "intel", "minBuild": 22000, "elevated": true }
+    /// ★ "backup": 共享备份组标识（同键多档条目共用一个还原点，与内置「CPU 调度各档」同机制）
+    /// ★ "revert": 显式还原写入，优先级高于备份（"只想改回某个固定值"时用它）
+    ///   "writes": [ { "hive": "HKLM", "path": "SOFTWARE\\X", "name": "Y",
+    ///                 "kind": "dword|qword|string|expand|multistring|binary|delete",
+    ///                 "value": 1,
+    /// ★               "revertValue": 0 } ]        // 等价于为该条写入单独声明"改回 0"
     /// }
+    ///
+    /// 还原优先级：条目级 revert > 写入级 revertValue > RegHelper 备份（默认）。
     /// </summary>
     public sealed class TweakPackProvider : ITweakProvider
     {
@@ -43,6 +48,9 @@ namespace GuyueBox.Core
 
         /// <summary>最近一次装载的非致命问题（文件损坏 / 条目非法 / 包被禁用等），供界面提示。</summary>
         public static readonly List<string> Problems = new List<string>();
+
+        /// <summary>最近一次装载的包清单：{ 文件名, 包名, 装载项数 }（供「优化包管理」按包展示结果）。</summary>
+        public static readonly List<string[]> LoadedPacks = new List<string[]>();
 
         public TweakPackProvider()
         {
@@ -106,6 +114,7 @@ namespace GuyueBox.Core
         private void Load()
         {
             Problems.Clear();
+            LoadedPacks.Clear();
 
             List<string> dirs = new List<string>();
             string a = AppPackFolder();
@@ -186,12 +195,15 @@ namespace GuyueBox.Core
                 limit = MaxItemsPerPack;
             }
 
+            int loaded = 0;
             for (int i = 0; i < limit; i++)
             {
                 ITweak t = BuildTweak(Json.AsObject(items[i]), packName, i);
                 if (t == null) continue;
                 _items.Add(t);
+                loaded++;
             }
+            LoadedPacks.Add(new string[] { fileName, packName, loaded.ToString() });
         }
 
         private ITweak BuildTweak(Dictionary<string, object> o, string packName, int index)
@@ -230,7 +242,7 @@ namespace GuyueBox.Core
             List<RegWrite> writes = new List<RegWrite>();
             for (int i = 0; i < arr.Count; i++)
             {
-                RegWrite w = BuildWrite(Json.AsObject(arr[i]), packName, id, i);
+                RegWrite w = BuildWrite(Json.AsObject(arr[i]), packName, id, i, false);
                 if (w != null) writes.Add(w);
             }
             if (writes.Count == 0)
@@ -239,23 +251,72 @@ namespace GuyueBox.Core
                 return null;
             }
 
-            RegTweak t = new RegTweak();
-            t.IdValue = id;
-            t.GroupValue = group;
-            t.NameValue = name;
-            t.DescriptionValue = Json.Str(o, "desc", "（来自优化包 " + packName + "）");
-            t.AdminOnlyValue = Json.Bool(o, "admin", false);
-            t.RiskyValue = Json.Bool(o, "risky", false);
-            t.RecommendedValue = Json.Bool(o, "recommended", false);
+            // ★ 还原写入：清单可显式声明「怎么改回去」，优先级高于 RegHelper 备份。
+            //   ① 条目级 "revert" 数组（最明确，推荐）；
+            //   ② 每条写入的 "revertValue"（够用时最省事），但必须**全部**声明——
+            //      因为 RegTweak.Revert 一旦看到 RevertWrites 就完全不再走备份，
+            //      混用会让没声明的那几条永远留在系统里（下面会拦下并提示）。
+            List<RegWrite> reverts = new List<RegWrite>();
+            List<object> revArr = Json.AsArray(Json.Get(o, "revert"));
+            if (revArr != null && revArr.Count > 0)
+            {
+                for (int i = 0; i < revArr.Count; i++)
+                {
+                    RegWrite rw = BuildWrite(Json.AsObject(revArr[i]), packName, id, i, true);
+                    if (rw != null) reverts.Add(rw);
+                    else Problems.Add(packName + "：" + id + " 的 revert 第 " + (i + 1) + " 条非法，已忽略。");
+                }
+            }
+            else
+            {
+                int declared = 0;
+                for (int i = 0; i < arr.Count; i++)
+                {
+                    Dictionary<string, object> wo = Json.AsObject(arr[i]);
+                    if (wo != null && Json.Get(wo, "revertValue") != null) declared++;
+                }
+                if (declared > 0 && declared == arr.Count)
+                {
+                    for (int i = 0; i < arr.Count; i++)
+                    {
+                        RegWrite rw = BuildWrite(Json.AsObject(arr[i]), packName, id, i, true);
+                        if (rw != null) reverts.Add(rw);
+                    }
+                }
+                else if (declared > 0)
+                {
+                    Problems.Add(packName + "：" + id + " 只有 " + declared + "/" + arr.Count +
+                        " 条写入声明了 revertValue：混用会漏还原，已整项退回备份还原；请全部声明或全部去掉。");
+                }
+            }
+
+            RegTweak t = RegTweak.Create(id, group, name,
+                Json.Str(o, "desc", "（来自优化包 " + packName + "）"),
+                adminOnly: Json.Bool(o, "admin", false),
+                risky: Json.Bool(o, "risky", false),
+                recommended: Json.Bool(o, "recommended", false),
+                backupId: Json.Str(o, "backup", null));
             for (int i = 0; i < writes.Count; i++) t.Enable.Add(writes[i]);
+            for (int i = 0; i < reverts.Count; i++) t.RevertWrites.Add(reverts[i]);
+
+            // ★ 适用条件：不满足时优化中心不显示、Apply 直接返回 false（不写无效键）
+            ICondition cond = BuildCondition(Json.AsObject(Json.Get(o, "when")), packName, id);
+            if (cond != null) t.ApplicableWhen(cond);
             return t;
         }
 
-        private RegWrite BuildWrite(Dictionary<string, object> o, string packName, string id, int index)
+        /// <summary>
+        /// 解析一条写入。forRevert=true 表示这是**还原方向**的写入：
+        /// 取值改读 revertValue（条目级 revert 数组里也可直接写 value），
+        /// 类型可用 revertKind 覆盖（启用方向是 delete、还原方向要写回原值时用得上）。
+        /// </summary>
+        private RegWrite BuildWrite(Dictionary<string, object> o, string packName, string id, int index,
+            bool forRevert)
         {
             if (o == null)
             {
-                Problems.Add(packName + "：" + id + " 第 " + (index + 1) + " 条写入不是对象，已跳过。");
+                Problems.Add(packName + "：" + id + " 第 " + (index + 1) +
+                    (forRevert ? " 条还原写入不是对象，已跳过。" : " 条写入不是对象，已跳过。"));
                 return null;
             }
 
@@ -275,10 +336,20 @@ namespace GuyueBox.Core
                 return null;
             }
 
-            string kind = Json.Str(o, "kind", "dword").ToLowerInvariant();
+            string kind = Json.Str(o, forRevert ? "revertKind" : "kind", null);
+            if (string.IsNullOrEmpty(kind))
+            {
+                // 还原方向未写 revertKind 时沿用启用方向的类型；
+                // 但启用方向是 delete 时不能拿 delete 当还原（那等于再删一次），退化为 dword 写回原值
+                kind = Json.Str(o, "kind", "dword");
+                if (forRevert && kind.Equals("delete", StringComparison.OrdinalIgnoreCase)) kind = "dword";
+            }
+            kind = kind.ToLowerInvariant();
             if (kind == "delete") return RegWrite.Remove(hive, path, valueName);
 
-            object raw = Json.Get(o, "value");
+            object raw = Json.Get(o, forRevert ? "revertValue" : "value");
+            // 条目级 revert 数组里通常直接写 "value"：还原方向没给 revertValue 时回落到 value
+            if (raw == null && forRevert) raw = Json.Get(o, "value");
 
             switch (kind)
             {
@@ -359,6 +430,57 @@ namespace GuyueBox.Core
                         kind + "\" 未知，已跳过。");
                     return null;
             }
+        }
+
+        /// <summary>
+        /// 解析条目的 "when" 适用条件：不满足即"本机不适用"（优化中心不显示、Apply 直接返回 false）。
+        /// 支持 vendor（显卡厂商，可逗号组合）/ cpu（处理器厂商）/ minBuild（Windows 内部版本下限）/
+        /// elevated（需管理员）。多个字段是与关系；没有任何可识别字段时返回 null（= 恒适用）。
+        /// 未知字段进 Problems，便于清单作者立刻发现拼写错误（否则会静默变成"恒适用"）。
+        /// </summary>
+        private ICondition BuildCondition(Dictionary<string, object> o, string packName, string id)
+        {
+            if (o == null) return null;
+
+            List<ICondition> parts = new List<ICondition>();
+            foreach (KeyValuePair<string, object> kv in o)
+            {
+                string key = kv.Key == null ? "" : kv.Key.ToLowerInvariant();
+                switch (key)
+                {
+                    case "vendor":
+                        {
+                            string v = ToStr(kv.Value).Trim();
+                            if (v.Length > 0) parts.Add(new GpuVendorCondition(v));
+                            break;
+                        }
+                    case "cpu":
+                        {
+                            string v = ToStr(kv.Value).Trim();
+                            if (v.Length > 0) parts.Add(new CpuVendorCondition(v));
+                            break;
+                        }
+                    case "minbuild":
+                        {
+                            int build;
+                            if (TryToInt(kv.Value, out build) && build > 0) parts.Add(new WindowsBuildCondition(build));
+                            else Problems.Add(packName + "：" + id + " 的 when.minBuild 不是正整数，已忽略。");
+                            break;
+                        }
+                    case "elevated":
+                        {
+                            if (Json.Bool(o, kv.Key, false)) parts.Add(new ElevatedCondition());
+                            break;
+                        }
+                    default:
+                        Problems.Add(packName + "：" + id + " 的 when 含未知字段 \"" + kv.Key +
+                            "\"，已忽略（可用：vendor / cpu / minBuild / elevated）。");
+                        break;
+                }
+            }
+
+            if (parts.Count == 0) return null;
+            return parts.Count == 1 ? parts[0] : new AllCondition(parts);
         }
 
         private static bool TryParseHive(string s, out RegistryHive hive)

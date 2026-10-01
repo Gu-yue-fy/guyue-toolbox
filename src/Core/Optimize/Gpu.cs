@@ -1,8 +1,7 @@
-﻿using System;
+/* 文件说明：显卡优化项：实例级延迟参数与厂商遥测关闭。 */
+
+using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Globalization;
-using System.IO;
 using Microsoft.Win32;
 
 namespace GuyueBox.Core
@@ -21,6 +20,11 @@ namespace GuyueBox.Core
         private readonly KeyValuePair<string, object>[] _values;
         private bool _risky;
         private Func<bool> _applicable;
+        private ICondition _condition;
+        /// <summary>门控条件（若有），供 UI 提示"不适用"原因与自动隐藏判定。</summary>
+        internal ICondition Condition { get { return _condition; } }
+        /// <summary>本机是否适用：无门控恒为 true；有门控按 _applicable 判定。</summary>
+        internal bool IsApplicable { get { return Applicable(); } }
 
         public GpuInstanceTweak(string id, string name, string desc, KeyValuePair<string, object>[] values)
         {
@@ -34,6 +38,14 @@ namespace GuyueBox.Core
         public GpuInstanceTweak ApplicableWhen(Func<bool> check)
         {
             _applicable = check;
+            return this;
+        }
+
+        /// <summary>按条件门控：满足时才可应用/显示（不满足默认隐藏）。可链式调用。</summary>
+        public GpuInstanceTweak ApplicableWhen(ICondition c)
+        {
+            _condition = c;
+            _applicable = delegate { return c.Satisfied(); };
             return this;
         }
 
@@ -122,7 +134,6 @@ namespace GuyueBox.Core
             return true;
         }
     }
-
     /// <summary>
     /// 显卡驱动 LTR 延迟参数（NVIDIA/AMD 低延迟注册表键）：
     /// 按 GPU 厂商把对应键集写入显卡实例子键，消除 PCIe LTR 与显示流水线的空闲等待。需重启生效。
@@ -232,10 +243,9 @@ namespace GuyueBox.Core
             return RegHelper.Restore(Id);
         }
     }
-
     /// <summary>
     /// 关闭 NVIDIA 驱动遥测：注册表开关（NvControlPanel2 / nvlddmkm / FTS RID 三处）
-    /// 加禁用 NvTm* 遥测计划任务（privacy.sexy 方案）。
+    /// 加禁用 NvTm* 遥测计划任务。
     /// </summary>
     public sealed class NvTelemetryTweak : ITweak
     {
@@ -268,6 +278,19 @@ namespace GuyueBox.Core
                 "-NoProfile -ExecutionPolicy Bypass -Command \"" + cmd + "\"", 60000).Ok;
         }
 
+        /// <summary>NvTm* 遥测计划任务全部处于禁用状态（本机无这些任务时视为已禁用，与 Apply 的尽力而为一致）。</summary>
+        private static bool TasksDisabled()
+        {
+            string cmd =
+                "Get-ScheduledTask -TaskPath '\\' -TaskName 'NvTm*' -ErrorAction SilentlyContinue | " +
+                "Where-Object { $_.State -ne 'Disabled' } | Select-Object -ExpandProperty TaskName";
+            Shell.Result r = Shell.Run("powershell.exe",
+                "-NoProfile -ExecutionPolicy Bypass -Command \"" + cmd + "\"", 60000);
+            if (!r.Ok) return false;
+            string text = r.All == null ? "" : r.All.Trim();
+            return text.Length == 0;
+        }
+
         public bool IsApplied()
         {
             for (int i = 0; i < RegKeys.Length; i++)
@@ -275,7 +298,8 @@ namespace GuyueBox.Core
                 object v = RegHelper.GetValue(RegistryHive.LocalMachine, RegKeys[i][0], RegKeys[i][1]);
                 if (v == null || Convert.ToInt32(v) != 0) return false;
             }
-            return true;
+            // 状态判定必须与 Apply 一致：除注册表开关外，还要校验 NvTm* 计划任务已禁用
+            return TasksDisabled();
         }
 
         public bool Apply()

@@ -1,91 +1,148 @@
-﻿# 古月工具包（GuyueBox）
+﻿# 古月工具箱（GuyueBox）
 
-![License](https://img.shields.io/badge/license-MIT-green)
-![Platform](https://img.shields.io/badge/platform-Windows%207--11-0078D6)
-![Framework](https://img.shields.io/badge/framework-.NET%20Framework%204.x-512BD4)
-![Language](https://img.shields.io/badge/language-C%23%20%2F%20WinForms-178600)
-![Auto-update](https://img.shields.io/badge/auto--update-SHA256%20verified-orange)
+面向 Windows 的原生系统优化工具箱，**C# / WinForms（.NET Framework 4.x）自绘界面**。
+编译产物是绿色单文件 `GuyueBox.exe`，不依赖任何运行时安装包；仓库自带 Roslyn 编译器（`tools\roslyn\`，
+由 `tools\install-roslyn.ps1` 按需下载），没有它也会回退系统自带 `csc.exe`（C# 5）——源码统一按 **C# 5 语法**
+书写，两条编译路径都能通过。
 
-一个面向 Windows 的原生系统优化与隐私工具，使用 **C# / WinForms（.NET Framework 4.x）** 编写。
-不需要安装任何 SDK —— 用系统自带的 `csc.exe` 即可编译，产物是单个 `GuyueBox.exe`，绿色运行。
+- 深空灰磨砂深色主题（可切浅色，6 种主题色，即时生效）
+- **390 项优化**：每一项自动备份原值、可独立还原；硬件感知（N 卡 / A 卡 / Intel、大小核 CPU）
+- **C# + PowerShell 协作**：批量系统操作（UWP 应用精简）由内置 PS 脚本承担，其余外部调用统一走受控命令边界
+- 完全免费开源（MIT），无激活、无广告、无功能限制、不上传任何数据
 
-![GuyueBox 主界面](https://gu-yue-fy.github.io/guyue-toolbox-site/assets/img/screenshot-main.png)
+## 免责声明（先读这段）
 
-- 深色主题、全自绘 UI（无图片 / 图标字体资源），6 种主题色可选
-- 每一项优化**自动备份原值、可独立还原**，谨慎项启用前二次确认
-- 硬件感知：N 卡 / A 卡 / Intel、Intel / AMD CPU 的专属优化自动适配，不适用的项自动失效
-- 完全免费开源（MIT），无激活、无功能限制
-- 内置自动更新，下载后**强制 SHA256 校验**
+本工具会修改系统注册表、服务、计划任务与电源设置。我们做了多层保护（自动备份、写入校验、
+谨慎项强制系统还原点、全部改动可一键还原），但**任何系统级修改都有风险**：
 
----
+- 不了解的项不要开；谨慎项（橙色标记）应用前请阅读详情栏的「风险与恢复」
+- 重要操作前工具会自动创建系统还原点，也建议你自行保留一份
+- 请在自己的机器上自行承担使用结果；发现问题欢迎提 Issue
 
-## 功能结构（6 分组 · 14 个功能页 · 28 个功能面板）
+## 快速开始
 
-| 分组 | 页面 | 说明 |
-| --- | --- | --- |
-| **概览** | 系统概览 | 实时资源统计、一键体检评分、硬件信息、导出报告 |
-| | 修复中心 | 「诊断 → 修复」闭环：健康评分环、10 项扫描、单项或一键修复（只做清缓存 / 刷新 DNS 等安全动作） |
-| **性能** | 全部优化项 | 170+ 项开关式优化（10 大类）总表，页内按分类筛选；支持外部优化包扩展 |
-| | 内存优化 | 一键回收待机列表与空闲工作集内存，占用排行与内存明细（即时工具，不改注册表） |
-| | 性能测试（2 标签页） | 性能基准（9 项测试，保存历史）＋ 高精度计时器（寻优系统定时器精度，仅运行期有效、退出自动还原） |
-| **网络** | 网络中心（2 标签页） | 网络诊断（刷新 DNS 缓存 / 续约 IP / Winsock·TCP-IP 重置 / DNS 预设快切）＋ Hosts 编辑 |
-| **系统** | 电源计划 | 查看与切换系统电源计划，按硬件给出推荐方案 |
-| | 系统配置（6 标签页） | 服务管理 / 计划任务 / 启动项管理 / 右键菜单 / 设备管理 / 系统还原点 |
-| | 进程与核心（2 标签页） | 进程列表（结束进程 / 释放内存）＋ CPU 核心调度（进程亲和性与优先级，即时生效不写注册表） |
-| | 已安装程序 | 列出已装软件，可打开安装位置或卸载 |
-| | 系统信息 | 处理器（含大小核判定）/ 显卡 / 主板固件 / 系统版本 / 磁盘明细，可导出报告 |
-| **清理** | 清理与磁盘（6 标签页） | 垃圾清理（10 类）/ 隐私清理 / 文件粉碎（1~7 次覆盖）/ 空间分析 / 重复文件（SHA256 去重）/ 磁盘健康（SMART） |
-| **设置** | 软件设置（2 标签页） | 常规设置（主题色、动画、启动检查更新）＋ 优化包管理（外部优化包装载状态） |
-| | 关于与更新 | 检查并应用 GitHub 自动更新 |
+到 [Releases](../../releases) 下载 `GuyueBox.exe`，右键**以管理员身份运行**即可（绿色单文件，
+配置保存在注册表 `HKCU\Software\GuyueBox`，卸载即删）。
 
-## 优化项（170+ 项 · 10 大类）
-
-开关式注册表 / 服务优化，覆盖十类：性能优化、外观与体验、隐私与安全、系统服务、电源与启动、游戏优化、网络优化、系统精简、音频优化、极限性能。外部优化包（`packs\*.json`）可再动态扩展，不计入内置项。
-
-安全机制：
-- 每项修改前自动备份注册表原值，**关闭开关即还原**
-- 谨慎项（Risky）应用前二次确认
-- 厂商专属项（N 卡 / A 卡 / Intel）在无关硬件上**自动判定不适用**，拒绝写入无效键
-- 「一键优化」会一次性应用所有标记为「推荐」且未启用的项，并在执行前列出清单请用户确认；仅高危单项在启用时自动创建系统还原点
-
-## 编译与运行
+从源码构建：
 
 ```powershell
-# 一键编译（使用系统 csc.exe，无需 SDK）
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
+# 一键编译（构建后自动跑优化项目录自检）
+powershell -ExecutionPolicy Bypass -File .\build.ps1
 
-# 编译并直接运行
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Run
+# 编译后直接启动
+powershell -ExecutionPolicy Bypass -File .\build.ps1 -Run
+
+# 提交前全量校验：编译 + 自检 + 外部进程边界 + 36 页截图回归 + 性能巡检
+powershell -ExecutionPolicy Bypass -File .\build.ps1 -Verify
+
+# 发版打包：编译 → SHA256 → 生成 bin\release\update.json / SHA256.txt
+powershell -ExecutionPolicy Bypass -File .\tools\make-release.ps1 -Version 2.1.0 -Notes "..."
 ```
 
-产物：`bin\GuyueBox.exe`（绿色单文件，建议以管理员身份运行以解锁全部功能）。
+## 功能导览（14 个大功能 · 35 页）
 
-图标资源由 `tools\make-icon.ps1` 生成。
+侧栏只列 14 个**大功能**；同一大功能下的小功能是**内容区顶部的页签栏**（点页签即切换，`Ctrl+Tab`
+在当前大功能内循环）。页面在 `src\UI\PageCatalog.cs` 统一注册——新增页面只加一行。
+
+| 大功能 | 页签 |
+| --- | --- |
+| **概览** | 系统概览（体检评分 · **电竞模式** · 硬件/磁盘实时信息）· 修复中心（13 项检查 → 一键修复闭环） |
+| **优化** | 全部优化项（390 项：分类 / 搜索 / 风险筛选 + 完整详情栏） |
+| **磁盘工具** | 清理（垃圾 + 使用痕迹）· 文件粉碎 · 空间分析 · 重复文件 · 磁盘健康 · 解除占用（查出占用文件的进程并结束） |
+| **电源计划** | 电源计划（计划一览与切换）· 高级电源设置（处理器 / 硬盘 / PCIe / 睡眠 / 显示 / 电池等子组，共 19 项隐藏电源项） |
+| **内存优化** | 内存优化（实时占用 · 明细拆分 · 一键与定时释放 · 占用排行） |
+| **计时器分辨率** | 计时器分辨率（实测寻优 + 手动指定，降低帧时间抖动） |
+| **性能跑分** | 性能跑分（标准化分数 · 性能等级 · 机型对比 · 前后对比） |
+| **N卡设置** | N 卡设置（3 套预设 + 14 项逐项可调）· 显卡伪装（型号伪装与一键还原） |
+| **进程管理** | 进程管理（点列头排序 / 结束进程树 / 绑核）· CPU 核心调度（亲和性预设，即时生效） |
+| **系统** | 系统信息（报告导出）· 系统还原点 |
+| **启动与后台** | 启动项管理 · 服务管理（一键提速 + 备份恢复）· 计划任务 · 设备管理 · 驱动一览 · 可选功能 · 右键菜单 |
+| **网络** | 网络诊断（端口占用 / 修复动作）· **DNS 切换**（120 条公共与运营商库，测速选优）· **MTU 优化** |
+| **应用** | 已安装程序（含 winget 安装 / 强制卸载）· 应用精简（UWP） |
+| **设置** | 常规设置 · 优化包管理 · 关于与更新 |
+
+**Ctrl + K** 任意页面呼出命令面板：直达任意页面、进入/退出电竞模式、检查更新。
+所有表格支持**点击列头排序**。
+
+## 优化中心（390 项）
+
+开关式注册表 / 服务 / 计划任务 / 电源设置优化，覆盖十类：游戏优化、性能优化、网络优化、
+电源与启动、隐私与安全、系统精简、外观与体验、系统服务、极限性能、音频优化。
+点击任意项在右侧查看完整详情：作用 / 原理 / 风险与恢复 / 将写入的注册表清单。
+
+安全机制：
+
+- 每项修改前自动备份原值，**关闭开关即还原**；写入后读回校验，失败自动回滚
+- 谨慎项（Risky）应用前二次确认，并**强制创建系统还原点**（24 小时内已有则跳过，创建失败即取消）
+- 硬件专属项在无关硬件上自动判定不适用、直接隐藏；只写已存在的键，不凭空造键
+- 一键推荐集**永远不包含**谨慎项；电竞预设已剔除经证实的伪优化 / 负优化项
+
+**本机专属推荐**：自动检测本机 CPU（Intel/AMD）与显卡（NVIDIA/AMD/Intel）组合，
+列出仅适用于本机硬件的专属优化项，一键应用。
+
+**方案管理**：保存当前优化组合为方案一键应用 / 同步；方案可导出为 `.stprofile` 文件分享，
+也可在别的机器导入。
+
+## 扩展包（不改代码给工具加功能）
+
+把 JSON 清单放进 `packs\`（或 `%LOCALAPPDATA%\GuyueBox\packs\`）即可在优化中心出现新条目：
+不装插件、不编译、不能执行任何命令（只能声明注册表写入），扩展面与风险都受控。
+
+清单格式 v2 支持：**适用条件**（`when`：显卡厂商 / CPU 厂商 / 系统版本 / 需管理员）、
+**显式还原**（`revert` 数组或每条写入的 `revertValue`）、**共享备份组**（`backup`）。
+完整格式说明与示例见 [`packs\example-pack.json`](packs/example-pack.json)，
+「设置 → 优化包管理」页可查看装载结果、重新扫描、导入导出。
+
+## 命令行
+
+```powershell
+# 优化项目录自检（构建脚本自动跑；未提权时可手动运行）
+GuyueBox.exe --selftest
+
+# 无人值守应用优化方案：不带 --yes 只打印计划，不改系统
+GuyueBox.exe --apply 我的方案.stprofile
+GuyueBox.exe --apply 我的方案.stprofile --yes
+
+# 性能巡检（每页构建 / 激活耗时）
+GuyueBox.exe --perf-tour perf.log
+```
+
+`--apply` 只启用方案里列出的项（不碰方案外已启用的项）；含谨慎项时强制过还原点闸门，
+创建失败即整体取消、一个键都不写。结果写入程序目录 `apply.log`，退出码 0 / 1 / 2。
+
+## 回归验证（改 UI 后必跑）
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build.ps1 -Verify   # 一键全量校验
+# 或分步：
+powershell -ExecutionPolicy Bypass -File .\ui-probe.ps1 -OutDir .\shots\candidate   # 全页自动截图
+powershell -ExecutionPolicy Bypass -File .\tools\shot-diff.ps1 -A .\shots\baseline -B .\shots\candidate
+bin\GuyueBox.exe --perf-tour bin\perf.log
+```
+
+截图基线**不入库**（截图包含本机的程序清单、硬件与网络信息，属个人隐私）：
+首次在本机跑 `ui-probe.ps1 -OutDir shots\baseline` 生成即可；之后确认改动符合预期时，
+把 `candidate` 覆盖成新的 `baseline`。`tools\shot-diff.ps1` 对展示实时数据的页面
+（服务 / 进程 / 网络 / 启动项等）有单独的放宽阈值，表头注明了每页实际使用的阈值。
 
 ## 仓库布局
 
 ```
-build.ps1              一键编译（系统 csc，无 SDK 依赖）
-update.json            更新源（客户端轮询此文件）
-src/                   源码（Program.cs / app.manifest / AssemblyInfo.cs + Core/ + UI/）
-tools/                 工具链（图标生成）
-bin/                   编译产物（gitignore）
+build.ps1            一键编译（+ 自检 + 脚本复制；-Verify 全量校验）
+ui-probe.ps1         UI 自动截图探针
+update.json          更新源（客户端轮询此文件，SHA256 校验）
+LICENSE              MIT
+src/                 Program.cs / app.manifest / Assets + Core/（引擎 + 业务域）+ UI/ + Scripts/
+  Core/              Clean / Engine / Infra / Net / Optimize / System / Tool
+  UI/                MainForm.* / PageCatalog / Theme / Gfx + Controls/ + Views/（35 页）
+  Scripts/           随程序分发的 PowerShell（如 appx.ps1）
+tools/               发版 / 回归工具链（roslyn\ 由 install-roslyn.ps1 下载，不入库）
+packs/               外部优化包示例（编译时同步到 bin\packs）
+shots/               截图基线（本地生成，含个人信息，不入库）
+bin/                 编译产物（不入库）
 ```
-
-## 更新机制
-
-采用 GitHub Releases 发布：
-
-1. 打 tag（如 `v1.2.0`）建 Release，上传 `GuyueBox.exe` 作为 asset
-2. 更新仓库根 `update.json`（字段：`version` / `url` / `sha256` / `notes`）并提交
-3. 老版本用户在「关于与更新」一键检查、下载（**自动 SHA256 校验**）、替换重启
-
-## 系统要求
-
-- Windows 7 / 8.1 / 10 / 11
-- .NET Framework 4.x（系统自带，无需另行安装）
-- 建议以管理员身份运行（部分优化与系统管理功能需要提权）
 
 ## License
 
-MIT —— 自由使用、修改与分发。
+[MIT](LICENSE)——自由使用、修改与分发。

@@ -1,10 +1,4 @@
-/* ============================================================
- * 文件说明：优化项库「任务调度」批量项。
- *           16 个系统计划任务合并为 4 个批量开关，状态判定走 Get-ScheduledTask 的
- *           .NET 枚举（Disabled/Ready），与系统显示语言无关；查询结果带短 TTL 缓存，
- *           避免优化中心探测时为每项各起一次 PowerShell。
- * 项目：古月工具包（GuyueBox）
- * ============================================================ */
+/* 文件说明：优化项库「任务调度」批量项：4 组共 16 个系统计划任务。 */
 
 using System;
 using System.Collections.Generic;
@@ -45,6 +39,9 @@ namespace GuyueBox.Core
         public bool Risky { get { return _risky; } }
         public bool Recommended { get { return false; } }
 
+        /// <summary>涉及的计划任务路径（只读；详情文案用）。</summary>
+        public string[] TaskPaths { get { return _taskPaths; } }
+
         public bool IsApplied()
         {
             if (_taskPaths.Length == 0) return false;
@@ -76,7 +73,7 @@ namespace GuyueBox.Core
         private bool SetEnabled(bool enable)
         {
             string script = BuildScript(_taskPaths, enable);
-            Shell.Result r = Shell.Run("powershell.exe", "-NoProfile -Command \"" + script + "\"", 90000);
+            Shell.Result r = Shell.Run("powershell.exe", "-NoProfile -Command \"" + script + "\"", 90000, isChange: true);
             if (!r.Ok) return false;
 
             // 解析 "OK=n;FAIL=n;MISS=n"
@@ -119,7 +116,6 @@ namespace GuyueBox.Core
             return sb.ToString();
         }
     }
-
     /// <summary>
     /// 计划任务状态缓存：一次 PowerShell 拉全量任务状态（TaskPath+TaskName+State），
     /// 供所有 ScheduledTaskTweak 共享，避免每项各起一次进程。TTL 15 秒。
@@ -188,8 +184,8 @@ namespace GuyueBox.Core
                     string line = lines[i].Trim();
                     if (line.Length == 0) continue;
                     if (line.StartsWith("\"TaskPath\"", StringComparison.OrdinalIgnoreCase)) continue; // 列头
-                    string[] f;
-                    if (!SplitCsv(line, out f) || f.Length < 3) continue;
+                    string[] f = Csv.SplitLine(line);
+                    if (f.Length < 3) continue;
 
                     string path = f[0].Trim();
                     string taskName = f[1].Trim();
@@ -215,37 +211,7 @@ namespace GuyueBox.Core
             s = s.Replace("\\\\", "\\");
             return s.ToLowerInvariant();
         }
-
-        private static bool SplitCsv(string line, out string[] fields)
-        {
-            List<string> outFields = new List<string>();
-            StringBuilder cur = new StringBuilder();
-            bool inQuotes = false;
-            for (int i = 0; i < line.Length; i++)
-            {
-                char c = line[i];
-                if (inQuotes)
-                {
-                    if (c == '"')
-                    {
-                        if (i + 1 < line.Length && line[i + 1] == '"') { cur.Append('"'); i++; }
-                        else inQuotes = false;
-                    }
-                    else cur.Append(c);
-                }
-                else
-                {
-                    if (c == '"') inQuotes = true;
-                    else if (c == ',') { outFields.Add(cur.ToString()); cur.Length = 0; }
-                    else cur.Append(c);
-                }
-            }
-            outFields.Add(cur.ToString());
-            fields = outFields.ToArray();
-            return true;
-        }
     }
-
     public static partial class TweakLibrary
     {
         /// <summary>任务调度批量项：4 组覆盖 16 个系统计划任务。</summary>

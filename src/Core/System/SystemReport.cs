@@ -1,4 +1,9 @@
-﻿﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：系统报告：汇总硬件与系统信息为文本并保存
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -11,7 +16,7 @@ namespace GuyueBox.Core
         public static string Build()
         {
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine("古月工具包 · 系统报告");
+            sb.AppendLine("古月工具箱 · 系统报告");
             sb.AppendLine("生成时间：" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
             sb.AppendLine(new string('=', 52));
 
@@ -84,7 +89,7 @@ namespace GuyueBox.Core
 
             sb.AppendLine();
             sb.AppendLine(new string('=', 52));
-            sb.AppendLine("由「古月工具包」生成。本报告仅作信息汇总，不含任何敏感凭据。");
+            sb.AppendLine("由「古月工具箱」生成。本报告仅作信息汇总，不含任何敏感凭据。");
 
             return sb.ToString();
         }

@@ -1,7 +1,7 @@
 {
-  "version": "1.2.0",
-  "date": "2026-09-24",
-  "url": "https://github.com/Gu-yue-fy/guyue-toolbox/releases/download/v1.2.0/GuyueBox.exe",
-  "sha256": "28ed6c01fb5b343fcd48d4838f1469b68584ea8300c0481b988df882225fc0f2",
-  "notes": "v1.2.0：页面重构为 6 分组 14 个功能页（新增修复中心、内存优化、系统信息、CPU 核心调度、Hosts 编辑、优化包管理）；全部优化项 170 项、覆盖 10 大类；内置自动更新（SHA256 校验）。"
+  "version": "3.0.0",
+  "url": "https://github.com/Gu-yue-fy/guyue-toolbox/releases/latest/download/GuyueBox.exe",
+  "sha256": "2c29c2346bf7f8e66af4bbe2b52bc3619b5bf79c7164e85145812cf04feff176",
+  "notes": "3.0 大版本：优化中心右栏与提示条全面重排（去框化、半透明圆角、修复文字空隙与徽章遮挡）；全部表格支持点列头排序；高级电源设置扩充到 7 个子组 19 项；N 卡设置 14 项逐项可调；新增无人值守 --apply 与扩展包 v2（适用条件/显式还原/共享备份组）；清理 6 组无效条目（396→390）；移除强绑规则；修复十余处缺陷（主题切换残留、方案同步卡死、表格底行被裁、加载圆环方框等）。",
+  "date": "2026-10-01"
 }

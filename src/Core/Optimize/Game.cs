@@ -1,4 +1,6 @@
-﻿using System;
+/* 文件说明：设备类中断优先级优化项（按设备类 GUID 设置 ISR/DPC 优先级）。 */
+
+using System;
 using Microsoft.Win32;
 
 namespace GuyueBox.Core
@@ -68,12 +70,16 @@ namespace GuyueBox.Core
 
         public bool IsApplied()
         {
+            // 校验范围必须与 Apply 完全一致：类键 + 显卡实例 0000-0009 + Control\Video 链路
+            // 类键：只校验已存在的类键（Apply 走 OnlyIfExists，不凭空造键的类键一律跳过）
             for (int i = 0; i < Entries.Length; i++)
             {
                 Entry e = Entries[i];
-                object baseV = RegHelper.GetValue(RegistryHive.LocalMachine, PathOf(e), "BasePriority");
+                string path = PathOf(e);
+                if (!KeyExists(path)) continue;
+                object baseV = RegHelper.GetValue(RegistryHive.LocalMachine, path, "BasePriority");
                 if (!BaseOk(baseV, e.BasePriority)) return false;
-                object overV = RegHelper.GetValue(RegistryHive.LocalMachine, PathOf(e), "OverTargetPriority");
+                object overV = RegHelper.GetValue(RegistryHive.LocalMachine, path, "OverTargetPriority");
                 if (e.OverTarget < 0)
                 {
                     if (overV != null) return false;
@@ -83,7 +89,65 @@ namespace GuyueBox.Core
                     if (!BaseOk(overV, e.OverTarget)) return false;
                 }
             }
+
+            // 显卡实例子键（0000-0009）：只校验已存在的实例，避免单显卡机器误报
+            const string GpuClass = ClassRoot + "\\{4d36e968-e325-11ce-bfc1-08002be10318}";
+            for (int i = 0; i < 10; i++)
+            {
+                string inst = GpuClass + "\\000" + i;
+                if (!KeyExists(inst)) continue;
+                if (!BaseOk(RegHelper.GetValue(RegistryHive.LocalMachine, inst, "BasePriority"), 255)) return false;
+                if (!BaseOk(RegHelper.GetValue(RegistryHive.LocalMachine, inst, "OverTargetPriority"), 96)) return false;
+            }
+
+            // 显卡链路（Control\Video\{GUID}\000x）：与 Apply 相同的动态枚举
+            try
+            {
+                using (RegistryKey root = Registry.LocalMachine.OpenSubKey(
+                    @"SYSTEM\CurrentControlSet\Control\Video", false))
+                {
+                    if (root != null)
+                    {
+                        string[] guids = root.GetSubKeyNames();
+                        for (int g = 0; g < guids.Length; g++)
+                        {
+                            using (RegistryKey dev = Registry.LocalMachine.OpenSubKey(
+                                @"SYSTEM\CurrentControlSet\Control\Video\" + guids[g], false))
+                            {
+                                if (dev == null) continue;
+                                string[] subs = dev.GetSubKeyNames();
+                                for (int s = 0; s < subs.Length; s++)
+                                {
+                                    if (subs[s].Length != 4 || !char.IsDigit(subs[s][0])) continue;
+                                    string path = @"SYSTEM\CurrentControlSet\Control\Video\" + guids[g] + "\\" + subs[s];
+                                    if (!BaseOk(RegHelper.GetValue(RegistryHive.LocalMachine, path, "BasePriority"), 255)) return false;
+                                    if (!BaseOk(RegHelper.GetValue(RegistryHive.LocalMachine, path, "OverTargetPriority"), 96)) return false;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                return false;
+            }
             return true;
+        }
+
+        private static bool KeyExists(string path)
+        {
+            try
+            {
+                using (RegistryKey k = Registry.LocalMachine.OpenSubKey(path, false))
+                {
+                    return k != null;
+                }
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         public bool Apply()

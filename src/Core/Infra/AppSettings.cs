@@ -1,6 +1,6 @@
-﻿/* ============================================================
+﻿﻿/* ============================================================
  * 文件说明：用户设置（注册表持久化）：主题色、动画、更新检查、窗口尺寸、提示条关闭记忆等。
- * 项目：古月工具包（GuyueBox）
+ * 项目：古月工具箱（GuyueBox）
  * ============================================================ */
 
 ﻿using System;
@@ -23,6 +23,8 @@ namespace GuyueBox.Core
         private static bool _lightTheme;
         private static bool _restoreLastPage;
         private static string _lastPage;
+        private static int _memAutoReleaseMinutes;
+        private static int _memWarnPercent = 85;
         private static bool _loaded;
 
         // 注意：读取器必须先 EnsureLoaded()，否则持久化的设置永远不会被读回
@@ -102,6 +104,28 @@ namespace GuyueBox.Core
                     }
                 }
                 catch { }
+            }
+        }
+
+        /// <summary>内存页：定时自动释放间隔（分钟；0 = 关闭）。</summary>
+        public static int MemAutoReleaseMinutes
+        {
+            get { EnsureLoaded(); return _memAutoReleaseMinutes; }
+            set
+            {
+                _memAutoReleaseMinutes = Clamp(value, 0, 240);
+                Save("MemAutoReleaseMinutes", _memAutoReleaseMinutes);
+            }
+        }
+
+        /// <summary>内存页：占用超过该百分比时在页面提醒（0 = 关闭提醒）。</summary>
+        public static int MemWarnPercent
+        {
+            get { EnsureLoaded(); return _memWarnPercent; }
+            set
+            {
+                _memWarnPercent = Clamp(value, 0, 99);
+                Save("MemWarnPercent", _memWarnPercent);
             }
         }
 
@@ -303,6 +327,8 @@ namespace GuyueBox.Core
                     _autoUpdateCheck = ReadInt(k, "AutoUpdateCheck", 1) != 0;
                     _lightTheme = ReadInt(k, "LightTheme", 0) != 0;
                     _restoreLastPage = ReadInt(k, "RestoreLastPage", 0) != 0;
+                    _memAutoReleaseMinutes = Clamp(ReadInt(k, "MemAutoReleaseMinutes", 0), 0, 240);
+                    _memWarnPercent = Clamp(ReadInt(k, "MemWarnPercent", 85), 0, 99);
                     _lastPage = (k.GetValue("LastPage") as string) ?? "";
                 }
             }

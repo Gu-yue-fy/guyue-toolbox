@@ -1,11 +1,7 @@
-﻿/* ============================================================
- * 文件说明：优化项库「Extreme」组的全部优化项声明。
- * 项目：古月工具包（GuyueBox）
- * ============================================================ */
+/* 文件说明：优化项库「极限性能」组。 */
 
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using Microsoft.Win32;
 
 namespace GuyueBox.Core
@@ -16,14 +12,11 @@ namespace GuyueBox.Core
         {
             List<ITweak> list = new List<ITweak>();
 
-            // 1. 内核漏洞利用缓解全关
-            RegTweak mitigation = new RegTweak();
-            mitigation.IdValue = "mitigation_off";
-            mitigation.GroupValue = GExtreme;
-            mitigation.NameValue = "关闭内核漏洞利用缓解";
-            mitigation.DescriptionValue = "关闭 SEHOP、异常链校验、CFG 导出/XFG 抑制与用户态缓解策略，消除这些缓解措施在每个进程/每次调用上的开销。代价：内核漏洞利用防护大幅下降，请勿在此状态下浏览不可信网站或运行来路不明程序。需重启生效。";
-            mitigation.AdminOnlyValue = true;
-            mitigation.RiskyValue = true;
+            // 内核漏洞利用缓解全关
+            var mitigation = RegTweak.Create("mitigation_off", GExtreme,
+                "关闭内核漏洞利用缓解",
+                "关闭 SEHOP、异常链校验、CFG 导出/XFG 抑制与用户态缓解策略，消除这些缓解措施在每个进程/每次调用上的开销。代价：内核漏洞利用防护大幅下降，请勿在此状态下浏览不可信网站或运行来路不明程序。需重启生效。",
+                adminOnly: true, risky: true);
             const string Kernel = @"SYSTEM\CurrentControlSet\Control\Session Manager\kernel";
             // 内核缓解掩码在注册表中是 REG_BINARY 位图（32 字节全 0），写字符串不被内核解析
             mitigation.Enable.Add(RegWrite.Binary(RegistryHive.LocalMachine, Kernel,
@@ -36,22 +29,19 @@ namespace GuyueBox.Core
             mitigation.Enable.Add(RegWrite.Dword(RegistryHive.LocalMachine, Kernel, "DisableControlFlowGuardExportSuppression", 1));
             list.Add(mitigation);
 
-            // 2. 漏洞驱动黑名单关闭
-            RegTweak vuln = new RegTweak();
-            vuln.IdValue = "vuln_blocklist_off";
-            vuln.GroupValue = GExtreme;
-            vuln.NameValue = "关闭漏洞驱动黑名单";
-            vuln.DescriptionValue = "微软维护的已知漏洞驱动（容易被利用读内核内存）黑名单不再强制拦截。部分底层工具（RWEverything 类、IMOD 修改）需要它才能加载驱动。代价：恶意驱动更容易被加载。需重启生效。";
-            vuln.AdminOnlyValue = true;
-            vuln.RiskyValue = true;
+            // 漏洞驱动黑名单关闭
+            var vuln = RegTweak.Create("vuln_blocklist_off", GExtreme,
+                "关闭漏洞驱动黑名单",
+                "微软维护的已知漏洞驱动（容易被利用读内核内存）黑名单不再强制拦截。部分底层工具（RWEverything 类、IMOD 修改）需要它才能加载驱动。代价：恶意驱动更容易被加载。已知兼容性问题：THE FINALS 等带内核级反作弊的游戏可能因此无法启动（曾有系统精简方案因该问题回退此优化），遇到游戏无法运行时先还原本项。需重启生效。",
+                adminOnly: true, risky: true);
             vuln.Enable.Add(RegWrite.Dword(RegistryHive.LocalMachine,
                 @"SYSTEM\CurrentControlSet\Control\CI\Config", "VulnerableDriverBlocklistEnable", 0));
             list.Add(vuln);
 
-            // 3. BCD 安全机制精简
+            // BCD 安全机制精简
             BcdTweak bcdSec = new BcdTweak("bcd_security_off",
                 "BCD 安全机制精简（DEP / 完整性 / ELAM，谨慎）",
-                "DEP 设为 AlwaysOff、关闭完整性检查与早期反恶意软件（ELAM）驱动、关闭隔离上下文与 TPM 启动熵。消除 DEP 检查与安全启动链的开销。代价：恶意代码防护大幅下降，仅建议离线/专用游戏机使用。重启生效。",
+                "DEP 设为 AlwaysOff、关闭完整性检查与早期反恶意软件（ELAM）驱动、关闭隔离上下文与 TPM 启动熵。消除 DEP 检查与安全启动链的开销。代价：恶意代码防护大幅下降，仅建议离线/专用游戏机使用。需重启生效。",
                 new string[]
                 {
                     "/set nx AlwaysOff",
@@ -74,14 +64,11 @@ namespace GuyueBox.Core
             bcdSec.GroupOverride = GExtreme;
             list.Add(bcdSec);
 
-            // 4. Defender 全家桶禁用
-            RegTweak defender = new RegTweak();
-            defender.IdValue = "defender_off";
-            defender.GroupValue = GExtreme;
-            defender.NameValue = "禁用 Windows Defender 全家桶";
-            defender.DescriptionValue = "停止 Defender 防病毒、实时监控、网络检查、安全中心与 WdFilter/WdBoot 内核驱动，并关闭 SmartScreen 与示例上报。游戏加载与进程创建不再被实时扫描拖慢——代价：失去全部系统级病毒防护，请配合本工具「安全检查」页或第三方方案。需重启生效。";
-            defender.AdminOnlyValue = true;
-            defender.RiskyValue = true;
+            // Defender 全家桶禁用
+            var defender = RegTweak.Create("defender_off", GExtreme,
+                "禁用 Windows Defender 全家桶",
+                "停止 Defender 防病毒、实时监控、网络检查、安全中心与 WdFilter/WdBoot 内核驱动，并关闭 SmartScreen 与示例上报。游戏加载与进程创建不再被实时扫描拖慢——代价：失去全部系统级病毒防护，请配合本工具「安全检查」页或第三方方案。需重启生效。",
+                adminOnly: true, risky: true);
             string[] defServices = new string[] { "WinDefend", "WdNisSvc", "Sense", "wscsvc" };
             for (int i = 0; i < defServices.Length; i++)
             {
@@ -104,14 +91,11 @@ namespace GuyueBox.Core
                 @"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer", "SmartScreenEnabled", "Off"));
             list.Add(defender);
 
-            // 5. UAC 完全关闭
-            RegTweak uac = new RegTweak();
-            uac.IdValue = "uac_off";
-            uac.GroupValue = GExtreme;
-            uac.NameValue = "关闭用户账户控制 (UAC)";
-            uac.DescriptionValue = "EnableLUA=0 完全关闭 UAC（不再弹提权确认、不再拆分令牌），部分老游戏与工具在非拆分令牌下表现更好。代价：所有程序默认以完整管理员权限运行。需重启生效。";
-            uac.AdminOnlyValue = true;
-            uac.RiskyValue = true;
+            // UAC 完全关闭
+            var uac = RegTweak.Create("uac_off", GExtreme,
+                "关闭用户账户控制 (UAC)",
+                "EnableLUA=0 完全关闭 UAC（不再弹提权确认、不再拆分令牌），部分老游戏与工具在非拆分令牌下表现更好。代价：所有程序默认以完整管理员权限运行。需重启生效。",
+                adminOnly: true, risky: true);
             uac.Enable.Add(RegWrite.Dword(RegistryHive.LocalMachine,
                 @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "EnableLUA", 0));
             uac.Enable.Add(RegWrite.Dword(RegistryHive.LocalMachine,
@@ -120,29 +104,23 @@ namespace GuyueBox.Core
                 @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "PromptOnSecureDesktop", 0));
             list.Add(uac);
 
-            // 6. GPU 超时检测关闭（TDR）
-            RegTweak tdr = new RegTweak();
-            tdr.IdValue = "tdr_off";
-            tdr.GroupValue = GExtreme;
-            tdr.NameValue = "关闭 GPU 超时检测与恢复 (TDR)";
-            tdr.DescriptionValue = "TdrLevel=0：显卡驱动不再因单帧计算超时被系统重置，超长编译的 shader 与重度负载不再触发黑屏闪退。代价：显卡真死机时系统不会自动恢复（直接黑屏，只能重启）。需重启生效。";
-            tdr.AdminOnlyValue = true;
-            tdr.RiskyValue = true;
+            // GPU 超时检测关闭（TDR）
+            var tdr = RegTweak.Create("tdr_off", GExtreme,
+                "关闭 GPU 超时检测与恢复 (TDR)",
+                "TdrLevel=0：显卡驱动不再因单帧计算超时被系统重置，超长编译的 shader 与重度负载不再触发黑屏闪退。代价：显卡真死机时系统不会自动恢复（直接黑屏，只能重启）。需重启生效。",
+                adminOnly: true, risky: true);
             tdr.Enable.Add(RegWrite.Dword(RegistryHive.LocalMachine,
                 @"SYSTEM\CurrentControlSet\Control\GraphicsDrivers", "TdrLevel", 0));
             list.Add(tdr);
 
-            // 8. Defender 删除级（备份服务键后 sc delete）
+            // Defender 删除级（备份服务键后 sc delete）
             list.Add(new DefenderRemoveTweak());
 
-            // 9. 防火墙全禁
-            RegTweak fw = new RegTweak();
-            fw.IdValue = "firewall_off";
-            fw.GroupValue = GExtreme;
-            fw.NameValue = "禁用 Windows 防火墙（全 Profile）";
-            fw.DescriptionValue = "关闭域/专用/公用三个 Profile 的防火墙，并禁用防火墙服务（mpssvc）——省去每个网络连接的过滤规则匹配开销。代价：入站出站全部不设防，仅建议有路由器 NAT 保护的家用环境使用。还原时自动回写原状态。";
-            fw.AdminOnlyValue = true;
-            fw.RiskyValue = true;
+            // 防火墙全禁
+            var fw = RegTweak.Create("firewall_off", GExtreme,
+                "禁用 Windows 防火墙（全 Profile）",
+                "关闭域/专用/公用三个 Profile 的防火墙，并禁用防火墙服务（mpssvc）——省去每个网络连接的过滤规则匹配开销。代价：入站出站全部不设防，仅建议有路由器 NAT 保护的家用环境使用。还原时自动回写原状态。",
+                adminOnly: true, risky: true);
             string[] profiles = new string[] { "Domain Profile", "Standard Profile", "Public Profile" };
             for (int i = 0; i < profiles.Length; i++)
             {
@@ -156,7 +134,7 @@ namespace GuyueBox.Core
                 @"SYSTEM\CurrentControlSet\Services\mpssvc", "Start", 4));
             list.Add(fw);
 
-            // 10. GPU 中断优先级提升（动态查询 IRQ）
+            // GPU 中断优先级提升（动态查询 IRQ）
             list.Add(new GpuIrqPriorityTweak());
 
             return list;
@@ -181,18 +159,20 @@ namespace GuyueBox.Core
             public string Name { get { return "删除 Windows Defender（服务 / 驱动 / 任务 / UI）"; } }
             public string Description
             {
-                get { return "删除级卸载：先关篡改保护，再禁用全部 Defender 计划任务，备份后删除 4 个服务与 3 个内核驱动的注册表键，并移除安全中心 UWP——进程创建、文件读写完全不再经过任何扫描钩子（比禁用更彻底，残留为 0）。还原时从备份完整重建服务键。建议先做系统备份；需要杀毒时还原本项即可。"; }
+                get { return "删除级卸载：先关篡改保护，再禁用全部 Defender 计划任务，备份后删除 3 个服务与 3 个内核驱动的注册表键，并移除安全中心 UWP——进程创建、文件读写完全不再经过任何扫描钩子（比禁用更彻底，残留为 0）。还原时从备份完整重建服务键。建议先做系统备份；需要杀毒时还原本项即可。"; }
             }
             public bool AdminOnly { get { return true; } }
             public bool Risky { get { return true; } }
             public bool Recommended { get { return false; } }
 
-            private static void CopyKey(Microsoft.Win32.RegistryKey src, Microsoft.Win32.RegistryKey dst)
+            /// <summary>递归复制键内容；任一值/子键失败返回 false（不静默吞错，供还原/删除失败判定）。</summary>
+            private static bool CopyKey(Microsoft.Win32.RegistryKey src, Microsoft.Win32.RegistryKey dst)
             {
+                bool ok = true;
                 foreach (string name in src.GetValueNames())
                 {
                     try { dst.SetValue(name, src.GetValue(name, null), src.GetValueKind(name)); }
-                    catch { }
+                    catch { ok = false; }
                 }
                 foreach (string sub in src.GetSubKeyNames())
                 {
@@ -201,48 +181,50 @@ namespace GuyueBox.Core
                         using (Microsoft.Win32.RegistryKey s = src.OpenSubKey(sub))
                         using (Microsoft.Win32.RegistryKey d = dst.CreateSubKey(sub))
                         {
-                            CopyKey(s, d);
+                            if (!CopyKey(s, d)) ok = false;
                         }
                     }
-                    catch { }
+                    catch { ok = false; }
                 }
+                return ok;
             }
 
-            private static void BackupService(string name)
+            /// <summary>备份服务键。返回 false 表示备份不完整：调用方绝不能删除该服务（否则无法还原）。</summary>
+            private static bool BackupService(string name)
             {
                 try
                 {
                     using (Microsoft.Win32.RegistryKey src = Microsoft.Win32.Registry.LocalMachine
                         .OpenSubKey(ServicesRoot + "\\" + name, false))
                     {
-                        if (src == null) return; // 已删除，无需备份
+                        if (src == null) return true; // 已删除，无需备份
                         using (Microsoft.Win32.RegistryKey dst = Microsoft.Win32.Registry.LocalMachine
                             .CreateSubKey(BackupRoot + "\\" + name))
                         {
-                            CopyKey(src, dst);
+                            return CopyKey(src, dst);
                         }
                     }
                 }
-                catch { }
+                catch { return false; }
             }
 
-            private static void RestoreService(string name)
+            private static bool RestoreService(string name)
             {
                 try
                 {
                     using (Microsoft.Win32.RegistryKey src = Microsoft.Win32.Registry.LocalMachine
                         .OpenSubKey(BackupRoot + "\\" + name, false))
                     {
-                        if (src == null) return;
+                        if (src == null) return true; // 无备份（备份前服务已不存在），视为成功
                         Microsoft.Win32.Registry.LocalMachine.DeleteSubKeyTree(ServicesRoot + "\\" + name, false);
                         using (Microsoft.Win32.RegistryKey dst = Microsoft.Win32.Registry.LocalMachine
                             .CreateSubKey(ServicesRoot + "\\" + name))
                         {
-                            CopyKey(src, dst);
+                            return CopyKey(src, dst);
                         }
                     }
                 }
-                catch { }
+                catch { return false; }
             }
 
             private static bool RunTasks(bool disable)
@@ -255,7 +237,7 @@ namespace GuyueBox.Core
                 for (int i = 0; i < tasks.Length; i++)
                 {
                     string verb = disable ? "/disable" : "/enable";
-                    if (!Shell.Run("schtasks.exe", "/Change /TN \"" + TasksPath + tasks[i] + "\" " + verb, 30000).Ok)
+                    if (!Shell.Run("schtasks.exe", "/Change /TN \"" + TasksPath + tasks[i] + "\" " + verb, 30000, isChange: true).Ok)
                         all = false;
                 }
                 return all;
@@ -273,7 +255,8 @@ namespace GuyueBox.Core
 
             public bool Apply()
             {
-                // 前置：关闭篡改保护
+                // 前置：关闭篡改保护，并回读校验（fail-closed：关不掉就如实失败——
+                // 篡改保护拦着时 sc delete 必然失败，不提前失败只会谎报成功）
                 try
                 {
                     Microsoft.Win32.Registry.SetValue(
@@ -281,19 +264,30 @@ namespace GuyueBox.Core
                         "TamperProtection", 0, Microsoft.Win32.RegistryValueKind.DWord);
                 }
                 catch { }
+                object tp = Microsoft.Win32.Registry.GetValue(
+                    @"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows Defender\Features",
+                    "TamperProtection", null);
+                if (tp != null)
+                {
+                    int tpv;
+                    try { tpv = Convert.ToInt32(tp); }
+                    catch { tpv = 1; }
+                    if (tpv != 0) return false; // 篡改保护仍在，Defender 删除不可能成功
+                }
 
                 bool ok = true;
                 if (!RunTasks(true)) ok = false;
                 for (int i = 0; i < ServiceNames.Length; i++)
                 {
-                    BackupService(ServiceNames[i]);
-                    Shell.Result r = Shell.Run("sc.exe", "delete " + ServiceNames[i], 30000);
+                    // 备份不完整的服务绝不删除（否则无法还原）——fail-closed
+                    if (!BackupService(ServiceNames[i])) { ok = false; continue; }
+                    Shell.Result r = Shell.Run("sc.exe", "delete " + ServiceNames[i], 30000, isChange: true);
                     if (!r.Ok) ok = false;
                 }
 
                 // 移除安全中心 UWP（尽力而为）
                 Shell.Run("powershell.exe",
-                    "-NoProfile -Command \"Get-AppxPackage *SecHealthUI* | Remove-AppxPackage\"", 120000);
+                    "-NoProfile -Command \"Get-AppxPackage *SecHealthUI* | Remove-AppxPackage\"", 120000, isChange: true);
 
                 return ok;
             }
@@ -303,7 +297,8 @@ namespace GuyueBox.Core
                 bool ok = true;
                 for (int i = 0; i < ServiceNames.Length; i++)
                 {
-                    RestoreService(ServiceNames[i]);
+                    // 还原不完整（子键/值复制失败）同样如实上报，不再静默吞错
+                    if (!RestoreService(ServiceNames[i])) ok = false;
                     // 确认键回来了
                     using (Microsoft.Win32.RegistryKey k = Microsoft.Win32.Registry.LocalMachine
                         .OpenSubKey(ServicesRoot + "\\" + ServiceNames[i], false))
@@ -316,7 +311,7 @@ namespace GuyueBox.Core
                 // 安全中心 UWP 重新注册（尽力而为）
                 Shell.Run("powershell.exe",
                     "-NoProfile -Command \"Get-AppxPackage -AllUsers *SecHealthUI* | ForEach-Object { Add-AppxPackage -Register ($_.InstallLocation + '\\AppxManifest.xml') -DisableDevelopmentMode }\"",
-                    120000);
+                    120000, isChange: true);
                 return ok;
             }
         }
@@ -348,11 +343,6 @@ namespace GuyueBox.Core
                 return s;
             }
 
-            private static string KeyPath(string irq)
-            {
-                return @"SYSTEM\CurrentControlSet\Control\PriorityControl";
-            }
-
             public bool IsApplied()
             {
                 string irq = GpuIrq();
@@ -378,8 +368,5 @@ namespace GuyueBox.Core
                 return RegHelper.Restore(Id);
             }
         }
-
-        // ---------------- 系统精简（砍掉普通用户用不到的后台组件） ----------------
-
     }
 }

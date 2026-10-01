@@ -1,4 +1,9 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：服务管理（SCM）：枚举、启停、修改启动类型
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
@@ -55,7 +60,6 @@ namespace GuyueBox.Core
             }
         }
     }
-
     /// <summary>
     /// 通过原生 Service 控制管理器 (advapi32) 管理 Windows 服务。
     /// 相比 WMI 枚举快一个数量级（冷启动从 1-3 秒降至 0.1 秒左右）。
@@ -371,6 +375,12 @@ namespace GuyueBox.Core
         // 操作
         // --------------------------------------------------------------
 
+        /// <summary>
+        /// 通过 SCM 修改服务启动类型：立即生效，用于服务管理页的手动操作。
+        /// 与之相对，优化中心里的"禁用某服务"是声明式优化项，走 RegHelper 写注册表并
+        /// 保留系统原值备份（见 ServiceTweak.Apply）——那条路径要的是可还原，不是即时生效。
+        /// 两者是职责分工，不是重复实现。
+        /// </summary>
         public static bool ChangeStartMode(string name, string mode, out string error)
         {
             error = "";

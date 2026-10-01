@@ -4,6 +4,7 @@ obj/
 
 # 探针截图（运行时产物）
 bin/probe/
+shots/
 
 # 界面自查截图（验证时临时产生，非发布素材；docs/pages 等正式预览图不忽略）
 docs/check/

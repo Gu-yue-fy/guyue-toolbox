@@ -1,4 +1,9 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：开关控件
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -14,7 +19,7 @@ namespace GuyueBox.UI
         private bool _press;
         private bool _readOnly;
         private float _animPos;   // 滑块位置 0（关）→1（开），插值动画
-        private Timer _anim;
+        private bool _animating;   // 是否正在播放滑块动画（替代原 _anim.Enabled 判断）
 
         public event EventHandler CheckedChanged;
 
@@ -74,7 +79,8 @@ namespace GuyueBox.UI
         /// <summary>程序化设置状态：直接跳位，不触发滑动动画（批量初始化用）。</summary>
         public void SetCheckedSilent(bool value)
         {
-            if (_anim != null) _anim.Stop();
+            AnimationClock.Instance.Unsubscribe(ToggleTick);
+            _animating = false;
             _animPos = value ? 1f : 0f;
             _checked = value;
             Invalidate();
@@ -90,31 +96,29 @@ namespace GuyueBox.UI
             _target = _checked ? 1f : 0f;
             _animFrom = _animPos;
             _animBegin = Environment.TickCount;
-            if (_anim == null)
+            _animating = true;
+            AnimationClock.Instance.Subscribe(ToggleTick);
+        }
+
+        private void ToggleTick()
+        {
+            float t = (Environment.TickCount - _animBegin) / (float)Theme.MotionActiveMs;
+            if (t >= 1f)
             {
-                _anim = new Timer();
-                _anim.Interval = 16;
-                _anim.Tick += delegate
-                {
-                    float t = (Environment.TickCount - _animBegin) / (float)Theme.MotionActiveMs;
-                    if (t >= 1f)
-                    {
-                        _animPos = _target;
-                        _anim.Stop();
-                    }
-                    else
-                    {
-                        _animPos = _animFrom + (_target - _animFrom) * Theme.Spring(t);
-                    }
-                    Invalidate();
-                };
+                _animPos = _target;
+                _animating = false;
+                AnimationClock.Instance.Unsubscribe(ToggleTick);
             }
-            _anim.Start();
+            else
+            {
+                _animPos = _animFrom + (_target - _animFrom) * Theme.Spring(t);
+            }
+            Invalidate();
         }
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing && _anim != null) _anim.Dispose();
+            if (disposing) AnimationClock.Instance.Unsubscribe(ToggleTick);
             base.Dispose(disposing);
         }
 
@@ -167,12 +171,9 @@ namespace GuyueBox.UI
             Graphics g = e.Graphics;
             Gfx.EnableSmoothing(g);
 
-            if (Parent != null)
             {
-                using (SolidBrush back = new SolidBrush(Parent.BackColor))
-                {
-                    g.FillRectangle(back, ClientRectangle);
-                }
+                // 铺底走父级真实背景（父级带光晕/渐变时不再盖成平色方块）
+                GuyueBox.UI.Backdrop.Paint(g, this);
             }
 
             int h = Math.Min(Height, 22);
@@ -201,7 +202,7 @@ namespace GuyueBox.UI
 
             int knob = h - 6;
             // 滑块位置按动画插值：开=右端，关=左端
-            float pos = _anim != null && _anim.Enabled ? _animPos : (_checked ? 1f : 0f);
+            float pos = _animating ? _animPos : (_checked ? 1f : 0f);
             // 弹簧过冲上限：允许轻微冲出轨道以保留弹性手感，但不越界过多
             if (pos < 0f) pos = 0f;
             if (pos > 1.05f) pos = 1.05f;
@@ -210,7 +211,8 @@ namespace GuyueBox.UI
             Gfx.FillRound(g, new Rectangle(knobX, knobY, knob, knob), knob / 2,
                 _checked ? Color.White : Theme.KnobOff);
 
-            if (Focused) A11y.DrawFocusRing(g, track, h / 2);
+            // 仅键盘导航时提示焦点：鼠标点完开关仍持有焦点，早先只判 Focused 会一直留框
+            if (Focused && ShowFocusCues) A11y.DrawFocusRing(g, track, h / 2);
         }
     }
 }

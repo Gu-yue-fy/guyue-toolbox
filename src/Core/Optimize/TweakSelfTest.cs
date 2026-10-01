@@ -1,25 +1,8 @@
-﻿/* ============================================================
- * 文件说明：优化项目录自检（护栏）。
- *
- * 借鉴成熟的源码级架构护栏测试思路（其
- * Tests/Changes/OptimizationProviderCanonicalArchitectureTests.cs 用一组
- * 不变量锁住目录：Id 唯一性、目录规模、每项必须走安全适配器）。
- * 本项目是单体 WinForms、无测试框架，因此做成**程序内自检**：
- * 由 Program 的 --selftest 开关调用，只读、不写注册表、无副作用。
- *
- * 它把这类问题从「靠自觉」变成「可自动发现」：
- *   · 改动 100+ 个优化项里的某一个，Id 撞车或忘了还原
- *   · 两个项写同一个注册表值却没共享 BackupId（还原值会互相污染）
- *   · CommandTweak 漏写 RevertFile（点了就回不去）
- *   · 数值类型与 RegistryValueKind 不匹配
- *
- * 注意：设计「只允许单一文件写注册表」的边界规则**不适用于本项目**
- * （本项目的注册表写入分散在 17 个文件里，强行收敛需要大改架构），故未照搬。
- * 项目：古月工具包（GuyueBox）
- * ============================================================ */
+/* 文件说明：优化项目录自检（护栏）：只读、无副作用，由 --selftest 开关调用。 */
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using Microsoft.Win32;
 
 namespace GuyueBox.Core
@@ -54,6 +37,7 @@ namespace GuyueBox.Core
             CheckKeyCollisions(r, all);
             CheckRiskFlags(r, all);
             CheckGroups(r, all);
+            CheckScriptFiles(r);
 
             return r;
         }
@@ -206,6 +190,23 @@ namespace GuyueBox.Core
                 // 一键推荐会直接应用推荐项，因此推荐项不允许同时是风险项
                 if (t.Recommended && t.Risky)
                     r.Failures.Add("[" + t.Id + "] 同时被标记为「推荐」与「有风险」：一键推荐会应用危险项。");
+            }
+        }
+
+        // ---------------- 脚本文件存在性 ----------------
+
+        private static void CheckScriptFiles(Result r)
+        {
+            string root;
+            try { root = AppDomain.CurrentDomain.BaseDirectory; }
+            catch { root = Environment.CurrentDirectory; }
+            // 只列真正被程序调用的协作脚本（net.ps1 随 v2.1 移除 DSCP 优化项后已无调用方，已删除）
+            string[] scripts = new string[] { "appx.ps1" };
+            for (int i = 0; i < scripts.Length; i++)
+            {
+                string full = Path.Combine(root, "scripts", scripts[i]);
+                if (!File.Exists(full))
+                    r.Warnings.Add("脚本文件缺失：" + full);
             }
         }
 

@@ -1,8 +1,7 @@
-﻿using System;
+/* 文件说明：电源类优化项：CPU 空闲、USB 挂起、磁盘 LPM、PCIe ASPM 等。 */
+
+using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Globalization;
-using System.IO;
 using Microsoft.Win32;
 
 namespace GuyueBox.Core
@@ -72,7 +71,7 @@ namespace GuyueBox.Core
 
         public bool Apply()
         {
-            // 启动时核心全数唤醒（Juxic 电源方案：InitialUnparkCount 系列注册表键）
+            // 启动时核心全数唤醒（InitialUnparkCount 系列注册表键）
             RegHelper.BeginBackup(Id);
             string[] unparkKeys = new string[] { "InitialUnparkCount", "Class1InitialUnparkCount", "Class2InitialUnparkCount" };
             bool reg = true;
@@ -117,7 +116,6 @@ namespace GuyueBox.Core
             return ok;
         }
     }
-
     /// <summary>
     /// 禁用新式待机（Modern Standby / S0ix）：PlatformAoAcOverride=0 + CsEnabled=0。
     /// 台式游戏机可避免待机时的后台唤醒活动；笔记本若固件不支持传统 S3 会失去睡眠功能，故为谨慎项。
@@ -164,7 +162,6 @@ namespace GuyueBox.Core
             return RegHelper.Restore(Id);
         }
     }
-
     /// <summary>
     /// 禁用 CPU 空闲状态（C-State 强制 C0）：微软官方实时性能建议项之一。
     /// 消除核心进入/退出空闲的唤醒延迟，代价是待机温度与功耗明显上升；开启 SMT 时单线程可能下降。
@@ -236,7 +233,6 @@ namespace GuyueBox.Core
             return PowerSet(ac, dc);
         }
     }
-
     // ===================================================================
     // 输入设备低延迟项（动态：电源计划 / USB 设备逐一处理）
     // ===================================================================
@@ -307,15 +303,21 @@ namespace GuyueBox.Core
 
         public bool Revert()
         {
-            if (string.IsNullOrEmpty(ActiveScheme())) return false;
-            Shell.Run("powercfg.exe",
-                "-setacvalueindex scheme_current " + UsbSubgroup + " " + UsbSuspendSetting + " 1", 30000);
-            Shell.Run("powercfg.exe",
-                "-setdcvalueindex scheme_current " + UsbSubgroup + " " + UsbSuspendSetting + " 1", 30000);
-            return Shell.Run("powercfg.exe", "-setactive scheme_current", 30000).Ok;
+            string scheme = ActiveScheme();
+            if (string.IsNullOrEmpty(scheme)) return false;
+            // 还原到该电源计划的出厂默认值（DefaultPowerSchemeValues），而非写死 1
+            string defPath = @"SYSTEM\CurrentControlSet\Control\Power\PowerSettings\" + UsbSubgroup +
+                "\\" + UsbSuspendSetting + @"\DefaultPowerSchemeValues\" + scheme;
+            int ac = RegHelper.GetInt(RegistryHive.LocalMachine, defPath, "ACSettingIndex", 1);
+            int dc = RegHelper.GetInt(RegistryHive.LocalMachine, defPath, "DCSettingIndex", 1);
+            bool ok = Shell.Run("powercfg.exe",
+                "-setacvalueindex scheme_current " + UsbSubgroup + " " + UsbSuspendSetting + " " + ac, 30000).Ok;
+            ok &= Shell.Run("powercfg.exe",
+                "-setdcvalueindex scheme_current " + UsbSubgroup + " " + UsbSuspendSetting + " " + dc, 30000).Ok;
+            ok &= Shell.Run("powercfg.exe", "-setactive scheme_current", 30000).Ok;
+            return ok;
         }
     }
-
     /// <summary>
     /// 磁盘链路电源管理（LPM）禁用：AHCI HIPM/DIPM、Adaptive、NVMe Idle Timeout。
     /// 磁盘进出低功耗状态的退出延迟是随机卡顿与加载尖峰的常见来源，SSD/HDD 均适用。
@@ -398,7 +400,6 @@ namespace GuyueBox.Core
         public bool Apply()
         {
             if (string.IsNullOrEmpty(ActiveScheme())) return false;
-            RegHelper.BeginBackup(Id);
             bool ok = false;
             for (int i = 0; i < Settings.Length; i++)
             {
@@ -408,7 +409,9 @@ namespace GuyueBox.Core
                     "-setdcvalueindex scheme_current " + DiskSubgroup + " " + Settings[i][0] + " 0", 30000).Ok;
                 if (ac && dc) ok = true; // 本机支持的至少一项写入成功即可
             }
-            ok &= Shell.Run("powercfg.exe", "-setactive scheme_current", 30000).Ok;
+            // setactive 只刷新生效状态，失败不影响写入结果，仅记日志
+            if (!Shell.Run("powercfg.exe", "-setactive scheme_current", 30000).Ok)
+                RegLog.Add(Id, "写入", "setactive 失败：电源计划未即时刷新（不影响已写入值）");
             return ok;
         }
 
@@ -432,7 +435,6 @@ namespace GuyueBox.Core
             return Shell.Run("powercfg.exe", "-setactive scheme_current", 30000).Ok;
         }
     }
-
     /// 逐个 USB 设备（鼠标 / 键盘 / 手柄 / 集线器）关闭「允许计算机关闭此设备以节约电源」。
     /// </summary>
     public sealed class UsbPowerTweak : ITweak
@@ -487,10 +489,11 @@ namespace GuyueBox.Core
             {
                 object enh = RegHelper.GetValue(RegistryHive.LocalMachine, paths[i], "EnhancedPowerManagementEnabled");
                 object sus = RegHelper.GetValue(RegistryHive.LocalMachine, paths[i], "SelectiveSuspend");
-                if (enh == null || sus == null) return false;
+                object dss = RegHelper.GetValue(RegistryHive.LocalMachine, paths[i], "DeviceSelectiveSuspended");
+                if (enh == null || sus == null || dss == null) return false;
                 try
                 {
-                    if (Convert.ToInt32(enh) != 0 || Convert.ToInt32(sus) != 0) return false;
+                    if (Convert.ToInt32(enh) != 0 || Convert.ToInt32(sus) != 0 || Convert.ToInt32(dss) != 0) return false;
                 }
                 catch
                 {
@@ -506,22 +509,24 @@ namespace GuyueBox.Core
             if (paths.Count == 0) return false;
 
             RegHelper.BeginBackup(Id);
+            bool ok = true;
             for (int i = 0; i < paths.Count; i++)
             {
                 try
                 {
-                    RegHelper.SetValue(RegistryHive.LocalMachine, paths[i], "EnhancedPowerManagementEnabled", 0,
-                        RegistryValueKind.DWord, Id);
-                    RegHelper.SetValue(RegistryHive.LocalMachine, paths[i], "SelectiveSuspend", 0,
-                        RegistryValueKind.DWord, Id);
-                    RegHelper.SetValue(RegistryHive.LocalMachine, paths[i], "DeviceSelectiveSuspended", 0,
-                        RegistryValueKind.DWord, Id);
+                    if (!RegHelper.SetValue(RegistryHive.LocalMachine, paths[i], "EnhancedPowerManagementEnabled", 0,
+                        RegistryValueKind.DWord, Id)) ok = false;
+                    if (!RegHelper.SetValue(RegistryHive.LocalMachine, paths[i], "SelectiveSuspend", 0,
+                        RegistryValueKind.DWord, Id)) ok = false;
+                    if (!RegHelper.SetValue(RegistryHive.LocalMachine, paths[i], "DeviceSelectiveSuspended", 0,
+                        RegistryValueKind.DWord, Id)) ok = false;
                 }
                 catch
                 {
+                    ok = false;
                 }
             }
-            return true;
+            return ok;
         }
 
         public bool Revert()
@@ -529,9 +534,8 @@ namespace GuyueBox.Core
             return RegHelper.Restore(Id);
         }
     }
-
     // ===================================================================
-    // 网卡高级属性（动态：每个驱动暴露的关键字逐一处理，与 NIC调整.bat 同思路）
+    // 网卡高级属性（动态：每个驱动暴露的关键字逐一处理）
     // ===================================================================
 
     public sealed class EnumPowerSweepTweak : ITweak
@@ -570,18 +574,20 @@ namespace GuyueBox.Core
                 ? fullPath.Substring(LmPrefix.Length) : fullPath;
         }
 
-        /// <summary>write=false 时探测（发现任一非 0 即返回 false）；write=true 时写 0（带备份）。</summary>
+        /// <summary>write=false 时探测（发现任一非 0 即返回 false）；write=true 时写 0（带备份）。
+        /// 键句柄用 using 管理（诊断报告 #3）：finally+Close 虽也能兜住异常，
+        /// 但与全项目规范不一致，且后续维护在 try 外加 return 时容易踩漏。</summary>
         private static bool Walk(string path, string[] names, bool write, ref int seen, int depth)
         {
             if (depth > 10) return true;
-            RegistryKey key = null;
+            RegistryKey key;
             try { key = Registry.LocalMachine.OpenSubKey(RelOf(path), write); }
             catch { return true; }
             if (key == null) return true;
 
-            bool ok = true;
-            try
+            using (key)
             {
+                bool ok = true;
                 string[] existing = key.GetValueNames();
                 for (int i = 0; i < names.Length; i++)
                 {
@@ -622,12 +628,8 @@ namespace GuyueBox.Core
                 {
                     ok = Walk(path + "\\" + subs[i], names, write, ref seen, depth + 1);
                 }
+                return ok;
             }
-            finally
-            {
-                key.Close();
-            }
-            return ok;
         }
 
         public bool IsApplied()
@@ -653,7 +655,6 @@ namespace GuyueBox.Core
             return RegHelper.Restore(Id);
         }
     }
-
     /// <summary>电源计划 PCIe 链路状态电源管理（ASPM）禁用，与 UsbSuspendTweak 同模式。</summary>
     public sealed class PciAspmTweak : ITweak
     {

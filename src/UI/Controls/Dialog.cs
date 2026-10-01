@@ -1,7 +1,13 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：与主题一致的自绘对话框（替代系统 MessageBox）
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
+using GuyueBox.Core;
 
 namespace GuyueBox.UI
 {
@@ -22,7 +28,7 @@ namespace GuyueBox.UI
 
         public static void Warn(IWin32Window owner, string title, string text)
         {
-            Show(owner, title, text, "info", Theme.Warning, false, false);
+            Show(owner, title, text, "warn", Theme.Warning, false, false);
         }
 
         public static void Error(IWin32Window owner, string title, string text)
@@ -137,7 +143,6 @@ namespace GuyueBox.UI
             }
         }
     }
-
     public enum DialogKind
     {
         Message,
@@ -347,12 +352,15 @@ namespace GuyueBox.UI
 
                 _input = new TextBox();
                 _input.Text = _inputDefault;
-                _input.BorderStyle = BorderStyle.FixedSingle;
                 _input.BackColor = Theme.WindowBg;
                 _input.ForeColor = Theme.TextPrimary;
                 _input.Font = Theme.FontBody;
                 _input.SetBounds(Edge, BodyTop + 26, width - Edge * 2, 28);
-                Controls.Add(_input);
+                // 用主题化外壳替代系统边框：BorderStyle.FixedSingle 的边框由系统绘制，
+                // 不跟随深浅配色（深色方案下是一条浅色框），ThemeSkin 也重映射不到它。
+                ThemeInput inputWrap = ThemeInput.Wrap(_input);
+                inputWrap.Location = new Point(Edge, BodyTop + 26);
+                Controls.Add(inputWrap);
 
                 textHeight = 0;
             }
@@ -504,34 +512,31 @@ namespace GuyueBox.UI
             Graphics g = e.Graphics;
             Gfx.EnableSmoothing(g);
 
-            using (SolidBrush b = new SolidBrush(Theme.CardBg))
+            SolidBrush b = GdiCache.Brush(Theme.CardBg);
             {
                 g.FillRectangle(b, ClientRectangle);
             }
-            using (Pen p = new Pen(Theme.BorderStrong, 1f))
+            Pen framePen = GdiCache.Pen(Theme.BorderStrong, 1f);
             {
-                g.DrawRectangle(p, 0, 0, Width - 1, Height - 1);
+                g.DrawRectangle(framePen, 0, 0, Width - 1, Height - 1);
             }
 
             // 顶部色条
-            using (SolidBrush b = new SolidBrush(_accent))
+            SolidBrush accentBar = GdiCache.Brush(_accent);
             {
-                g.FillRectangle(b, 0, 0, Width, 3);
+                g.FillRectangle(accentBar, 0, 0, Width, 3);
             }
 
             IconPainter.Draw(g, _icon, new Rectangle(Edge, 22, 20, 20), _accent);
 
-            using (SolidBrush b = new SolidBrush(Theme.TextPrimary))
-            {
-                Rectangle r = new Rectangle(Edge + 30, 18, Width - Edge * 2 - 46, 28);
-                Gfx.DrawTextEllipsis(g, _title, Theme.FontSubTitle, Theme.TextPrimary, r);
-            }
+            Rectangle titleRect = new Rectangle(Edge + 30, 18, Width - Edge * 2 - 46, 28);
+            Gfx.DrawTextEllipsis(g, _title, Theme.FontSubTitle, Theme.TextPrimary, titleRect);
 
             if (_kind != DialogKind.Input)
             {
-                using (Pen p = new Pen(Theme.Border))
+                Pen sepLine = GdiCache.Pen(Theme.Border, 1f);
                 {
-                    g.DrawLine(p, Edge, 62, Width - Edge, 62);
+                    g.DrawLine(sepLine, Edge, 62, Width - Edge, 62);
                 }
             }
 
@@ -572,6 +577,45 @@ namespace GuyueBox.UI
             {
                 _input.Focus();
                 _input.SelectAll();
+            }
+            PlayEnter();
+        }
+
+        /// <summary>
+        /// 弹出过渡：淡入 + 自下方 14px 上浮到位（约 150ms）。
+        /// 对话框是"突然盖上来"的一块卡，直接硬切显得生硬；这段过渡把它变成"浮现"。
+        /// 系统不支持分层窗口（远程桌面等）时静默退化为直接显示，不影响功能。
+        /// </summary>
+        private void PlayEnter()
+        {
+            if (!AppSettings.Animations) return;
+            try
+            {
+                int fromTop = Top + 14;
+                Top = fromTop;
+                Opacity = 0.0;
+
+                float pos = 0f;
+                Action tick = null;
+                tick = delegate
+                {
+                    pos += 0.18f;
+                    bool done = pos >= 1f;
+                    if (done) pos = 1f;
+                    float t = Theme.Ease.CubicOut(pos);
+                    Opacity = t;
+                    Top = fromTop - (int)(14 * t);
+                    if (done)
+                    {
+                        Opacity = 1.0;
+                        AnimationClock.Instance.Unsubscribe(tick);
+                    }
+                };
+                AnimationClock.Instance.Subscribe(tick);
+            }
+            catch
+            {
+                try { Opacity = 1.0; } catch { }
             }
         }
     }

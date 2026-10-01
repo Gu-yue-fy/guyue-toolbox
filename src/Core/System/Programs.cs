@@ -1,4 +1,9 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：已安装软件清单：注册表多分支读取与卸载程序启动
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -31,7 +36,6 @@ namespace GuyueBox.Core
             get { return SizeBytes > 0 ? SysInfo.FormatSize(SizeBytes) : "未知"; }
         }
     }
-
     /// <summary>
     /// 读取系统中已安装的软件清单（32/64 位、本机/当前用户）。
     /// 只读注册表，不修改任何东西。
@@ -203,32 +207,8 @@ namespace GuyueBox.Core
                 }
             }
 
-            try
-            {
-                ProcessStartInfo psi = new ProcessStartInfo();
-                psi.FileName = fileName;
-                psi.Arguments = args;
-                psi.UseShellExecute = true;
-                psi.Verb = "runas";
-                using (Process.Start(psi)) { }
-                return true;
-            }
-            catch
-            {
-                try
-                {
-                    ProcessStartInfo psi = new ProcessStartInfo();
-                    psi.FileName = fileName;
-                    psi.Arguments = args;
-                    psi.UseShellExecute = true;
-                    using (Process.Start(psi)) { }
-                    return true;
-                }
-                catch
-                {
-                    return false;
-                }
-            }
+            // 提权启动逻辑统一在 Shell.StartElevated（runas 优先，被拒绝时回退普通启动）
+            return Shell.StartElevated(fileName, args);
         }
     }
 }

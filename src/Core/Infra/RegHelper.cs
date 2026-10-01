@@ -1,6 +1,6 @@
-﻿/* ============================================================
+/* ============================================================
  * 文件说明：注册表读写核心：修改前自动备份原值，还原时精确恢复（含『原本不存在则删除』的空键清理）。
- * 项目：古月工具包（GuyueBox）
+ * 项目：古月工具箱（GuyueBox）
  * ============================================================ */
 
 ﻿using System;
@@ -29,19 +29,6 @@ namespace GuyueBox.Core
         public string Key
         {
             get { return Hive.ToString() + "|" + Path + "|" + Name; }
-        }
-
-        /// <summary>旧格式整串（仅用于识别，不再写入）。</summary>
-        public string Serialize()
-        {
-            StringBuilder sb = new StringBuilder();
-            sb.Append(Hive.ToString()).Append('|');
-            sb.Append(Path).Append('|');
-            sb.Append(Name).Append('|');
-            sb.Append(Existed ? '1' : '0').Append('|');
-            sb.Append(((int)Kind).ToString(CultureInfo.InvariantCulture)).Append('|');
-            sb.Append(Data);
-            return sb.ToString();
         }
 
         /// <summary>新格式内容段（定位信息在值名中）。</summary>
@@ -238,7 +225,6 @@ namespace GuyueBox.Core
             }
         }
     }
-
     /// <summary>
     /// 注册表读写 + 自动备份 / 还原。
     /// </summary>
@@ -533,12 +519,11 @@ namespace GuyueBox.Core
             return BackupRoot + "\\" + backupId;
         }
 
-        /// <summary>开始一次新的备份会话，会清除该 id 的旧备份。</summary>
         /// <summary>
-        /// 备份组建立（保留式）：已有备份不重置。
-        /// RecordOriginal 按键去重，保证重复 Apply、以及多个互斥变体共享同一
-        /// 备份组（BackupIdValue）时，首次记录的系统原值不会被后续覆盖——
-        /// 否则 apply→apply→revert 会把"优化值"当原值还原回去。
+        /// 备份事务起点（保留式语义）：本方法故意为空（仅作扩展钩子）。
+        /// 系统原值的记录由 RecordOriginal 在首次写入对应键时完成，
+        /// 并按「键」去重且永不覆盖——保证「原值只记第一次」，
+        /// 否则 apply→apply→revert 会把优化值误当原值还原回去。
         /// </summary>
         public static void BeginBackup(string backupId)
         {

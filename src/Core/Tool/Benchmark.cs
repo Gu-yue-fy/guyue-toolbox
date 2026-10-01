@@ -1,4 +1,9 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：性能基准测试：九项测试与评分
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -80,7 +85,6 @@ namespace GuyueBox.Core
             return 0;
         }
     }
-
     public static class Benchmark
     {
         private static double _sink; // 防止 JIT 优化掉计算
@@ -121,6 +125,43 @@ namespace GuyueBox.Core
             r.When = DateTime.Now;
             Save(r);
             return r;
+        }
+
+        /// <summary>
+        /// 带取消令牌的运行：每步之间检查 isCancelled，取消则返回 null（不写历史）。
+        /// 供专门的跑分页使用；原 <see cref="Run(Action{string})"/> 保持不变。
+        /// </summary>
+        public static BenchmarkResult Run(Action<string> status, Func<bool> isCancelled)
+        {
+            if (isCancelled == null) isCancelled = delegate { return false; };
+            BenchmarkResult r = new BenchmarkResult();
+            r.CoreCount = Environment.ProcessorCount;
+
+            if (CheckCancel(isCancelled, status, "CPU 单核…")) return null;
+            r.CpuSingleMops = CpuSingle(1500);
+            if (CheckCancel(isCancelled, status, "CPU 多核…")) return null;
+            r.CpuMultiMops = CpuMulti(1500);
+            if (CheckCancel(isCancelled, status, "内存读写…")) return null;
+            Memory(out r.MemReadMBs, out r.MemWriteMBs);
+            if (CheckCancel(isCancelled, status, "磁盘读写…")) return null;
+            Disk(out r.DiskWriteMBs, out r.DiskReadMBs);
+            if (CheckCancel(isCancelled, status, "AES 加密吞吐…")) return null;
+            r.AesMBs = AesThroughput();
+            if (CheckCancel(isCancelled, status, "GZip 压缩吞吐…")) return null;
+            r.GzipMBs = GzipThroughput();
+            if (CheckCancel(isCancelled, status, "磁盘 4K 随机读…")) return null;
+            r.Disk4kIops = Disk4kRandomRead();
+
+            r.Score = ComputeScore(r);
+            r.When = DateTime.Now;
+            return r;
+        }
+
+        private static bool CheckCancel(Func<bool> c, Action<string> s, string msg)
+        {
+            if (c != null && c()) return true;
+            if (s != null) s(msg);
+            return false;
         }
 
         private static double CpuSingle(int ms)

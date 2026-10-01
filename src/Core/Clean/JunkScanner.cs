@@ -1,4 +1,9 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：垃圾文件扫描：按类别枚举可清理项并统计体积
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
@@ -38,7 +43,6 @@ namespace GuyueBox.Core
             get { return Scanned ? SysInfo.FormatSize(Size) : "—"; }
         }
     }
-
     /// <summary>
     /// 扫描 / 清理磁盘垃圾。所有删除操作都做异常隔离，遇到占用中的文件直接跳过。
     /// </summary>
@@ -530,13 +534,6 @@ namespace GuyueBox.Core
         // ---------------------------------------------------------------
         // 通配符匹配（支持 * 与 ?）
         // ---------------------------------------------------------------
-
-        public static bool MatchWildcard(string text, string pattern)
-        {
-            if (string.IsNullOrEmpty(pattern)) return true;
-            if (string.IsNullOrEmpty(text)) return false;
-            return MatchLower(text.ToLowerInvariant(), pattern.ToLowerInvariant());
-        }
 
         /// <summary>把模式列表一次性预转小写：扫描 / 清理按文件逐个匹配时不再重复分配。</summary>
         private static string[] PreparePatterns(List<string> patterns)

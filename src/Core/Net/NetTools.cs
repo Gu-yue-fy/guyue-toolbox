@@ -1,4 +1,9 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：网络诊断与端口占用：flushdns、协议栈重置、netstat 解析
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.NetworkInformation;
@@ -32,7 +37,6 @@ namespace GuyueBox.Core
             }
         }
     }
-
     public sealed class PingResult
     {
         public string Host;
@@ -49,7 +53,6 @@ namespace GuyueBox.Core
             get { return Sent == 0 ? 0 : (Sent - Received) * 100.0 / Sent; }
         }
     }
-
     public sealed class PortInfo
     {
         public string Protocol;
@@ -221,6 +224,104 @@ namespace GuyueBox.Core
             return r;
         }
 
+        /// <summary>
+        /// 带「禁止分片 (DF)」的单次探测。payload 为 ICMP 数据字节数（不含 IP 头 20 + ICMP 头 8）：
+        /// 能以 payload 成功往返 ⇒ 路径上允许通过 payload + 28 字节的包，即路径 MTU ≥ payload + 28。
+        /// 返回 PacketTooBig / 超时都视为不通过（MTU 寻优据此逐级收敛）。
+        /// </summary>
+        public static bool PingDontFragment(string host, int payload, int timeoutMs, out long roundtripMs)
+        {
+            roundtripMs = -1;
+            if (string.IsNullOrWhiteSpace(host) || payload < 0) return false;
+            try
+            {
+                using (Ping ping = new Ping())
+                {
+                    PingOptions opt = new PingOptions(64, true); // dontFragment = true
+                    PingReply reply = ping.Send(host, timeoutMs, new byte[payload], opt);
+                    if (reply == null || reply.Status != IPStatus.Success) return false;
+                    roundtripMs = reply.RoundtripTime;
+                    return true;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>设置指定网卡的 IPv4 MTU（netsh persistent，重启后仍生效）。</summary>
+        public static Shell.Result SetMtu(string adapter, int mtu)
+        {
+            return Shell.Run("netsh.exe",
+                "interface ipv4 set subinterface \"" + adapter + "\" mtu=" + mtu + " store=persistent", 30000);
+        }
+
+        /// <summary>寻优结果记忆文件（网卡名 → 最近一次寻优的最优 MTU）。</summary>
+        private static string MtuMemoryPath
+        {
+            get
+            {
+                return System.IO.Path.Combine(System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "GuyueBox"), "mtu-best.txt");
+            }
+        }
+
+        /// <summary>读取「网卡 → 最优 MTU」记忆（键不区分大小写；无记录返回空表）。</summary>
+        public static Dictionary<string, int> LoadBestMtu()
+        {
+            Dictionary<string, int> map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                string path = MtuMemoryPath;
+                if (!System.IO.File.Exists(path)) return map;
+                string[] lines = System.IO.File.ReadAllLines(path);
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    int bar = lines[i].LastIndexOf('|');
+                    if (bar <= 0) continue;
+                    int mtu;
+                    if (!int.TryParse(lines[i].Substring(bar + 1).Trim(), out mtu)) continue;
+                    if (mtu < 1000) continue;
+                    string name = lines[i].Substring(0, bar).Trim();
+                    if (name.Length > 0) map[name] = mtu;
+                }
+            }
+            catch
+            {
+            }
+            return map;
+        }
+
+        /// <summary>记录某网卡本次寻优的最优 MTU（同网卡覆盖，最多保留 50 条）。</summary>
+        public static bool SaveBestMtu(string adapter, int mtu)
+        {
+            if (string.IsNullOrEmpty(adapter) || mtu < 1000) return false;
+            try
+            {
+                Dictionary<string, int> map = LoadBestMtu();
+                map[adapter.Trim()] = mtu;
+
+                List<string> lines = new List<string>();
+                int n = 0;
+                foreach (KeyValuePair<string, int> kv in map)
+                {
+                    if (kv.Key.IndexOf('|') >= 0) continue;
+                    lines.Add(kv.Key + "|" + kv.Value);
+                    n++;
+                    if (n >= 50) break;
+                }
+                System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(MtuMemoryPath));
+                System.IO.File.WriteAllLines(MtuMemoryPath, lines.ToArray(), new UTF8Encoding(false));
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         // ---------------- 端口 ----------------
 
         /// <summary>
@@ -332,17 +433,23 @@ namespace GuyueBox.Core
 
         public static Shell.Result ResetTcpIp()
         {
-            return Shell.Run("netsh.exe", "int ip reset", 60000);
+            return Shell.Run("netsh.exe", "int ip reset", 60000, isChange: true);
         }
 
         public static Shell.Result ClearArpCache()
         {
-            return Shell.Netsh("interface ip delete arpcache");
+            return Shell.Netsh("interface ip delete arpcache", true);
         }
 
         /// <summary>
         /// 读取各网卡的接口 MTU（netsh interface ipv4 show subinterfaces）。
         /// 返回「接口名 → MTU」列表（接口名保留原始中文名）。读取失败返回空列表。
+        /// netsh 列布局随系统版本不同：
+        ///   旧版「Idx Met MTU 状态 名称」（MTU 为第 2~3 个数字）；
+        ///   Win11 新版「MTU MediaSenseState BytesIn BytesOut 名称」（MTU 为第 1 个数字）。
+        /// 因此不再按固定列号取值，而是在 4 个数字列中找落在合理 MTU 区间
+        /// [576, 65535] 的最大值（跃点/状态是 1~75 的小数字，字节计数动辄上亿，
+        /// 4294967295 回环值超界——三者天然被区间滤掉，两种布局都能命中 MTU）。
         /// </summary>
         public static List<KeyValuePair<string, int>> GetMtuList()
         {
@@ -354,12 +461,32 @@ namespace GuyueBox.Core
                 for (int i = 0; i < lines.Length; i++)
                 {
                     string line = lines[i].Trim();
-                    // 形如：  12    1500    1500   1500  "以太网"
+                    // 形如：  1500                1     635496181      13489494  以太网（Win11）
+                    //   或：   12      35       1500   connected    以太网（旧版）
                     System.Text.RegularExpressions.Match m = System.Text.RegularExpressions.Regex.Match(
                         line, @"^(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(.+)$");
                     if (!m.Success) continue;
-                    int mtu;
-                    if (!int.TryParse(m.Groups[2].Value, out mtu)) continue;
+                    int mtu = -1;
+                    // 新格式（Win11+）：第一列即 MTU，直接命中即可。
+                    // 旧格式：第一列是 Idx/Met（< 576），MTU 在后续列中。
+                    int g1;
+                    if (int.TryParse(m.Groups[1].Value, out g1) && g1 >= 576 && g1 <= 65535)
+                    {
+                        mtu = g1;
+                    }
+                    else
+                    {
+                        for (int g = 2; g <= 4; g++)
+                        {
+                            int v;
+                            if (int.TryParse(m.Groups[g].Value, out v) && v >= 576 && v <= 65535)
+                            {
+                                mtu = v;
+                                break;
+                            }
+                        }
+                    }
+                    if (mtu < 0) continue;
                     string name = m.Groups[5].Value.Trim().Trim('"');
                     if (name.Length == 0) continue;
                     if (name.IndexOf("Loopback", StringComparison.OrdinalIgnoreCase) >= 0) continue; // 回环接口无意义
@@ -369,6 +496,5 @@ namespace GuyueBox.Core
             catch { }
             return result;
         }
-
     }
 }

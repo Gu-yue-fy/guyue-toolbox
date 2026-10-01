@@ -1,4 +1,9 @@
-﻿using System;
+﻿﻿/* ============================================================
+ * 文件说明：「标签 — 值」信息面板
+ * 项目：古月工具箱（GuyueBox）
+ * ============================================================ */
+
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
@@ -11,6 +16,15 @@ namespace GuyueBox.UI
     public class InfoList : RoundPanel
     {
         public const int RowHeight = 25;
+
+        /// <summary>
+        /// 信息卡的定稿高度：标题 46 + 行高 × 行数 + 底部留白 12。
+        /// 原先系统信息页与扩展包页各写了一份同名公式，现只留这一份。
+        /// </summary>
+        public static int HeightFor(int rows)
+        {
+            return 46 + Math.Max(1, rows) * RowHeight + 12;
+        }
 
         private readonly List<string[]> _rows = new List<string[]>();
         private int _labelWidth = 0;
@@ -139,7 +153,7 @@ namespace GuyueBox.UI
                     IconPainter.Draw(g, IconKind, new Rectangle(20, 17, 14, 14), CaptionColor);
                     x = 46;
                 }
-                using (SolidBrush b = new SolidBrush(Theme.TextPrimary))
+                SolidBrush b = GdiCache.Brush(Theme.TextPrimary);
                 using (StringFormat sf = new StringFormat())
                 {
                     sf.LineAlignment = StringAlignment.Center;
@@ -148,7 +162,7 @@ namespace GuyueBox.UI
                     g.DrawString(Caption, Theme.FontBodyBold, b,
                         new Rectangle(x, 12, Math.Max(10, Width - x - 18), 24), sf);
                 }
-                using (Pen p = new Pen(Theme.BorderSoft))
+                Pen p = GdiCache.Pen(Theme.BorderSoft, 1f);
                 {
                     g.DrawLine(p, 16, Card.HeaderSize - 3, Width - 17, Card.HeaderSize - 3);
                 }
@@ -195,7 +209,7 @@ namespace GuyueBox.UI
 
                 if (i < _rows.Count - 1)
                 {
-                    using (Pen p = new Pen(Gfx.Alpha(Theme.BorderSoft, 150)))
+Pen p = GdiCache.Pen(Gfx.Alpha(Theme.BorderSoft, 150), 1f);
                     {
                         g.DrawLine(p, 18, y + RowHeight - 1, Width - 19, y + RowHeight - 1);
                     }

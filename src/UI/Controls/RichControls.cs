@@ -1,12 +1,13 @@
-﻿/* ============================================================
+﻿﻿/* ============================================================
  * 文件说明：高信息密度展示控件（设计「工具型 / 模块型」页面的主视觉承载面）：
  *           RingGauge 环形仪表、HeroCard 工具卡、RankStrip 排行条、CoreMatrix 核心矩阵。
  *           这些控件的共同职责是把「一个关键数字 + 它的上下文」画成可一眼读懂的图形，
  *           而不是再用一行「标签 / 数值」——后者是界面显得简陋的主因。
- * 项目：古月工具包（GuyueBox）
+ * 项目：古月工具箱（GuyueBox）
  * ============================================================ */
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -103,37 +104,14 @@ namespace GuyueBox.UI
 
             Rectangle ring = new Rectangle((Width - size) / 2, (Height - size) / 2, size, size);
 
-            // 轨道
-            g.DrawEllipse(GdiCache.Pen(Theme.CardBgAlt, t), ring);
-
             double pct = _percent;
             if (pct < 0) pct = 0;
             if (pct > 100) pct = 100;
 
-            if (pct > 0)
-            {
-                Color to = _toneTo.IsEmpty ? _tone : _toneTo;
-                float sweep = (float)(pct * 3.6);
-                // 每段约 12°：段数随弧长自适应，短弧不会白画几十段
-                int seg = (int)Math.Ceiling(sweep / 12.0);
-                if (seg < 1) seg = 1;
-
-                for (int i = 0; i < seg; i++)
-                {
-                    float a0 = -90f + sweep * i / seg;
-                    float a1 = -90f + sweep * (i + 1) / seg;
-                    Color c = seg <= 1 ? _tone : Gfx.Blend(_tone, to, (double)i / (seg - 1));
-                    // 相邻段多画 0.8° 覆盖接缝，避免出现断线
-                    g.DrawArc(GdiCache.Pen(c, t), ring, a0, (a1 - a0) + 0.8f);
-                }
-
-                // 末端圆点：让弧的收尾像设计那样有"落点"
-                double endRad = (-90.0 + sweep) * Math.PI / 180.0;
-                int rr = (size - t) / 2;
-                int cx = ring.X + size / 2 + (int)Math.Round(Math.Cos(endRad) * rr);
-                int cy = ring.Y + size / 2 + (int)Math.Round(Math.Sin(endRad) * rr);
-                g.FillEllipse(GdiCache.Brush(to), cx - t / 2, cy - t / 2, t, t);
-            }
+            // 轨道 + 渐变进度弧 + 末端落点：与模块健康卡共用 Gfx.DrawRingArc，
+            // 每段约 12°（段数随弧长自适应，短弧不会白画几十段）
+            Gfx.DrawRingArc(g, ring, t, pct * 3.6, _tone,
+                _toneTo.IsEmpty ? _tone : _toneTo, false, true, 12.0);
 
             // 中心：主数值 + 单位（合成一行水平居中）
             SizeF vw = g.MeasureString(_centerText, Theme.FontMetric);
@@ -159,7 +137,6 @@ namespace GuyueBox.UI
             }
         }
     }
-
     /// <summary>
     /// 工具型 Hero 卡，对应设计 <c>mem-hero</c>：
     /// 玻璃底 + 环境光晕 + 左侧圆环仪表 + 中部标题 / 说明 / 实时指标 + 右侧圆形主操作。
@@ -259,6 +236,56 @@ namespace GuyueBox.UI
             _cta.Location = new Point(Width - cs - 34, (Height - cs) / 2);
         }
 
+        /// <summary>
+        /// 环境光晕：右侧偏上的强调色，制造"光源在卡内"的层次。
+        /// 用多层同心椭圆近似径向渐变：单层大椭圆被卡片圆角裁剪后，边界是一条**硬边**，
+        /// 观感就是"贴了一个透明方块"（红/橙这类高饱和色调下尤其明显）。
+        /// </summary>
+        private void PaintGlow(Graphics g)
+        {
+            Rectangle box = new Rectangle(0, 0, Width - 1, Height - 1);
+            GraphicsPath clip = GdiCache.RoundRect(box, Theme.RadiusCard);
+            GraphicsState st = g.Save();
+            g.SetClip(clip);
+            int gw = 620;            // 光晕尺寸：够大但不至于把整卡染红
+            int gh2 = 460;
+            int gcx = Width - 150;   // 光晕中心：卡片右上方
+            int gcy = 30;
+            using (GraphicsPath gp = new GraphicsPath())
+            {
+                gp.AddEllipse(gcx - gw / 2, gcy - gh2 / 2, gw, gh2);
+                using (PathGradientBrush pgb = new PathGradientBrush(gp))
+                {
+                    // 中心亮、边缘完全透明：真正的径向渐变，任何裁剪边界上都不留硬边
+                    pgb.CenterColor = Gfx.Alpha(_gauge.Tone, 40);
+                    pgb.SurroundColors = new Color[] { Gfx.Alpha(_gauge.Tone, 0) };
+                    pgb.CenterPoint = new PointF(gcx, gcy);
+                    g.FillPath(pgb, gp);
+                }
+            }
+            g.Restore(st);
+        }
+
+        /// <summary>
+        /// 子控件铺底：卡片底面 + 光晕。
+        /// 圆形主按钮（「一键诊断」）的圆角外、以及圆环周围，都靠它取到真实背景；
+        /// 此前按钮只铺 Parent.BackColor，把那块光晕盖成平色，圆钮四周就露出一圈硬边方框。
+        /// </summary>
+        public override void PaintBackdrop(Graphics g, Control child)
+        {
+            base.PaintBackdrop(g, child);
+            if (g == null || child == null) return;
+
+            GraphicsState st = g.Save();
+            try
+            {
+                g.SetClip(new Rectangle(0, 0, child.Width, child.Height));
+                g.TranslateTransform(-child.Left, -child.Top);
+                PaintGlow(g);
+            }
+            finally { g.Restore(st); }
+        }
+
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
@@ -266,17 +293,7 @@ namespace GuyueBox.UI
             Graphics g = e.Graphics;
             Gfx.EnableSmoothing(g);
 
-            Rectangle box = new Rectangle(0, 0, Width - 1, Height - 1);
-
-            // 环境光晕：右侧偏上的低 alpha 强调色，制造"光源在卡内"的层次
-            GraphicsPath clip = GdiCache.RoundRect(box, Theme.RadiusCard);
-            GraphicsState st = g.Save();
-            g.SetClip(clip);
-            using (SolidBrush glow = new SolidBrush(Gfx.Alpha(_gauge.Tone, 22)))
-            {
-                g.FillEllipse(glow, Width - 300, -110, 420, 300);
-            }
-            g.Restore(st);
+            PaintGlow(g);
 
             int x = _gauge.Right + 26;
             int right = _cta.Left - 26;
@@ -329,7 +346,6 @@ namespace GuyueBox.UI
             }
         }
     }
-
     /// <summary>
     /// 排行条，对应设计 <c>mem-top-strip</c>：
     /// 单行高度内呈现「名次 + 图标块 + 名称 + 迷你条 + 数值」，
@@ -357,6 +373,34 @@ namespace GuyueBox.UI
         /// <summary>点击右上角刷新按钮。</summary>
         public event EventHandler RefreshClick;
 
+        /// <summary>
+        /// 点击某一行（选中行序号通过 <see cref="SelectedIndex"/> 取）。
+        /// 只有存在订阅者时行才可点——hover/选中高亮随之启用，不影响只用它做纯展示的页面。
+        /// </summary>
+        public event EventHandler RowClick;
+
+        private int _hoverRow = -1;
+        private int _selectedRow = -1;
+
+        /// <summary>当前选中行（-1 = 无）。</summary>
+        public int SelectedIndex { get { return _selectedRow; } }
+
+        /// <summary>清除选中态（数据刷新后由页面调用，避免行数变化后序号悬空）。</summary>
+        public void ClearSelection()
+        {
+            if (_selectedRow == -1) return;
+            _selectedRow = -1;
+            Invalidate();
+        }
+
+        private const int RowTop = 46;
+        private const int RowH = 32;
+
+        private Rectangle RowRect(int index)
+        {
+            return new Rectangle(6, RowTop + index * RowH, Math.Max(1, Width - 12), RowH);
+        }
+
         public RankStrip()
         {
             BackColor = Theme.CardBg;
@@ -383,6 +427,8 @@ namespace GuyueBox.UI
         {
             _rows.Clear();
             if (rows != null) _rows.AddRange(rows);
+            _hoverRow = -1;
+            if (_selectedRow >= _rows.Count) _selectedRow = -1;
             Invalidate();
         }
 
@@ -407,15 +453,34 @@ namespace GuyueBox.UI
             return 46 + rows * 32 + 10;
         }
 
+        /// <summary>鼠标位置命中的行号（-1 = 不在任何行上）。</summary>
+        private int HitRow(Point p)
+        {
+            if (RowClick == null) return -1;
+            if (p.Y < RowTop) return -1;
+            int idx = (p.Y - RowTop) / RowH;
+            if (idx < 0 || idx >= _rows.Count) return -1;
+            return RowRect(idx).Contains(p) ? idx : -1;
+        }
+
         protected override void OnMouseMove(MouseEventArgs e)
         {
             bool h = _refreshRect.Contains(e.Location);
             if (h != _refreshHover)
             {
                 _refreshHover = h;
-                Cursor = h ? Cursors.Hand : Cursors.Default;
                 Invalidate(_refreshRect);
             }
+
+            int hr = HitRow(e.Location);
+            if (hr != _hoverRow)
+            {
+                int old = _hoverRow;
+                _hoverRow = hr;
+                if (old >= 0) Invalidate(RowRect(old));
+                if (hr >= 0) Invalidate(RowRect(hr));
+            }
+            Cursor = (h || hr >= 0) ? Cursors.Hand : Cursors.Default;
             base.OnMouseMove(e);
         }
 
@@ -424,9 +489,15 @@ namespace GuyueBox.UI
             if (_refreshHover)
             {
                 _refreshHover = false;
-                Cursor = Cursors.Default;
                 Invalidate(_refreshRect);
             }
+            if (_hoverRow >= 0)
+            {
+                int old = _hoverRow;
+                _hoverRow = -1;
+                Invalidate(RowRect(old));
+            }
+            Cursor = Cursors.Default;
             base.OnMouseLeave(e);
         }
 
@@ -436,6 +507,19 @@ namespace GuyueBox.UI
             {
                 EventHandler h = RefreshClick;
                 if (h != null) h(this, EventArgs.Empty);
+                base.OnMouseUp(e);
+                return;
+            }
+            if (e.Button == MouseButtons.Left)
+            {
+                int idx = HitRow(e.Location);
+                if (idx >= 0)
+                {
+                    _selectedRow = idx;
+                    Invalidate();
+                    EventHandler h = RowClick;
+                    if (h != null) h(this, EventArgs.Empty);
+                }
             }
             base.OnMouseUp(e);
         }
@@ -480,6 +564,13 @@ namespace GuyueBox.UI
             {
                 Row r = _rows[i];
 
+                // 可点击时才有 hover / 选中底色（纯展示页面保持原样）
+                if (RowClick != null && (i == _hoverRow || i == _selectedRow))
+                {
+                    Gfx.FillRound(g, RowRect(i), 8,
+                        i == _selectedRow ? Gfx.Alpha(Theme.Accent, 26) : Theme.CardBgAlt);
+                }
+
                 // 名次（等宽，弱化；首位用语义色强调）
                 Gfx.DrawTextEllipsis(g, r.Rank.ToString(), Theme.FontMono,
                     r.Rank == 1 ? r.Tone : Theme.TextMuted,
@@ -513,7 +604,6 @@ namespace GuyueBox.UI
             }
         }
     }
-
     /// <summary>
     /// 核心矩阵，对应设计 cpu-core 的「P/E 核棋盘」：
     /// 每个逻辑核一个方格，可点选/取消（表示是否允许该核参与调度），
@@ -522,7 +612,8 @@ namespace GuyueBox.UI
     public class CoreMatrix : Control
     {
         private int _cores = 8;
-        private ulong _mask = 0xFF;
+        private BitArray _sel = new BitArray(8, true);   // 第 i 个逻辑核是否被选中（全局序号）
+        private bool[] _isPerf = new bool[8];            // 第 i 个逻辑核是否为性能核（P/E 着色用）
         private int _hover = -1;
         private int _focus = -1;
         private const int CellW = 52;
@@ -546,10 +637,12 @@ namespace GuyueBox.UI
             get { return _cores; }
         }
 
-        /// <summary>当前选中的核掩码（bit i 对应第 i 个逻辑核）。</summary>
-        public ulong Mask
+        /// <summary>当前选中的全局逻辑处理器序号列表（跨处理器组也连续编号）。</summary>
+        public List<int> SelectedGlobals()
         {
-            get { return _mask; }
+            List<int> list = new List<int>();
+            for (int i = 0; i < _cores; i++) if (_sel[i]) list.Add(i);
+            return list;
         }
 
         public int SelectedCount
@@ -557,34 +650,47 @@ namespace GuyueBox.UI
             get
             {
                 int n = 0;
-                for (int i = 0; i < _cores && i < 64; i++)
-                {
-                    if ((_mask & (1UL << i)) != 0) n++;
-                }
+                for (int i = 0; i < _cores; i++) if (_sel[i]) n++;
                 return n;
             }
         }
 
-        /// <summary>重设核数并全选（切换目标进程/重新检测时调用）。</summary>
+        /// <summary>重设核数并全选（切换目标进程/重新检测时调用）。不再钳制 64 核上限。</summary>
         public void SetCoreCount(int cores)
         {
             if (cores < 1) cores = 1;
-            if (cores > 64) cores = 64;
             _cores = cores;
-            _mask = cores >= 64 ? ulong.MaxValue : ((1UL << cores) - 1);
+            _sel = new BitArray(cores, true);
+            _isPerf = new bool[cores];
             LayoutChanged();
         }
 
-        /// <summary>按外部得到的掩码回填（读取进程当前亲和性后调用）。</summary>
-        public void SetMask(ulong mask)
+        /// <summary>按全局序号列表回填（读取进程当前亲和性后调用）。</summary>
+        public void SetSelectedGlobals(List<int> globals)
         {
-            _mask = mask;
+            _sel = new BitArray(_cores, false);
+            if (globals != null)
+                foreach (int g in globals) if (g >= 0 && g < _cores) _sel[g] = true;
+            Invalidate();
+        }
+
+        /// <summary>标记每个核是否为性能核（true=性能核 / false=能效核），用于 P/E 棋盘着色。</summary>
+        public void SetCoreMeta(bool[] isPerformance)
+        {
+            if (isPerformance != null && isPerformance.Length == _cores) _isPerf = isPerformance;
             Invalidate();
         }
 
         public void SelectAll()
         {
-            _mask = _cores >= 64 ? ulong.MaxValue : ((1UL << _cores) - 1);
+            for (int i = 0; i < _cores; i++) _sel[i] = true;
+            LayoutChanged();
+        }
+
+        /// <summary>清空全部选择（仅在外部逻辑保证至少保留一核时使用）。</summary>
+        public void ClearSelection()
+        {
+            for (int i = 0; i < _cores; i++) _sel[i] = false;
             LayoutChanged();
         }
 
@@ -670,9 +776,8 @@ namespace GuyueBox.UI
                 {
                     _focus = idx; // 鼠标点选也同步键盘焦点
                     // 不允许把所有核都取消——那会得到一个无法调度的空掩码
-                    ulong bit = 1UL << idx;
-                    if ((_mask & bit) != 0 && SelectedCount <= 1) { Invalidate(); return; }
-                    _mask = (_mask & bit) != 0 ? (_mask & ~bit) : (_mask | bit);
+                    if (_sel[idx] && SelectedCount <= 1) { Invalidate(); return; }
+                    _sel[idx] = !_sel[idx];
                     Invalidate();
                     EventHandler h = SelectionChanged;
                     if (h != null) h(this, EventArgs.Empty);
@@ -705,9 +810,8 @@ namespace GuyueBox.UI
             {
                 if (_focus >= 0)
                 {
-                    ulong bit = 1UL << _focus;
-                    if ((_mask & bit) != 0 && SelectedCount <= 1) { e.Handled = true; return; }
-                    _mask = (_mask & bit) != 0 ? (_mask & ~bit) : (_mask | bit);
+                    if (_sel[_focus] && SelectedCount <= 1) { e.Handled = true; return; }
+                    _sel[_focus] = !_sel[_focus];
                     Invalidate();
                     EventHandler h = SelectionChanged;
                     if (h != null) h(this, EventArgs.Empty);
@@ -746,13 +850,15 @@ namespace GuyueBox.UI
                 int row = i / cols;
                 Rectangle cell = new Rectangle(2 + col * cw, 3 + row * ch, CellW, CellH);
 
-                bool on = i < 64 && (_mask & (1UL << i)) != 0;
+                bool on = _sel[i];
                 bool hover = i == _hover;
 
-                Color fill = on ? Gfx.Alpha(Theme.Accent, hover ? 90 : 60) : Theme.CardBgAlt;
+                // 性能核用强调蓝、能效核用青色，未选中时只画淡描边，让 P/E 棋盘一眼可辨
+                Color accent = _isPerf[i] ? Theme.Accent : Theme.Cyan;
+                Color fill = on ? Gfx.Alpha(accent, hover ? 90 : 60) : Theme.CardBgAlt;
                 Gfx.FillRound(g, cell, Theme.RadiusChip, fill);
                 Gfx.StrokeRound(g, cell, Theme.RadiusChip,
-                    on ? Gfx.Alpha(Theme.Accent, 190) : Theme.BorderSoft, 1f);
+                    on ? Gfx.Alpha(accent, 190) : (_isPerf[i] ? Gfx.Alpha(Theme.Accent, 60) : Gfx.Alpha(Theme.Cyan, 60)), 1f);
 
                 // 键盘焦点环：让 Tab 聚焦后用方向键 + 空格操作的用户能看清当前选中核
                 if (i == _focus)
@@ -760,7 +866,7 @@ namespace GuyueBox.UI
                     Gfx.StrokeRound(g, cell, Theme.RadiusChip, Theme.TextPrimary, 2f);
                 }
 
-                Gfx.DrawTextCenter(g, on ? "#" + (i + 1) : "#" + (i + 1),
+                Gfx.DrawTextCenter(g, "#" + (i + 1),
                     Theme.FontSmall, on ? Theme.TextPrimary : Theme.TextMuted, cell);
             }
         }

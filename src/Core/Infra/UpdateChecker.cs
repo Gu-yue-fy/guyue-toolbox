@@ -1,6 +1,6 @@
-﻿/* ============================================================
+﻿﻿/* ============================================================
  * 文件说明：更新检查：轮询仓库 update.json -> 版本比较 -> 下载校验（SHA256）-> PowerShell 脚本替换本体。
- * 项目：古月工具包（GuyueBox）
+ * 项目：古月工具箱（GuyueBox）
  * ============================================================ */
 
 ﻿using System;
@@ -9,9 +9,11 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net;
+using System.Net.Http;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading.Tasks;
 using Microsoft.Win32;
 
 namespace GuyueBox.Core
@@ -29,7 +31,12 @@ namespace GuyueBox.Core
         {
             long mine = VersionNumber(currentVersion);
             long theirs = VersionNumber(Version);
-            return mine > 0 && theirs > mine;
+            // 边界（诊断报告 #5）：程序集版本意外为 0.0.0.0 时，mine=0 且旧式判定
+            // mine>0 恒 false → 永远检测不到更新。改为「远端有效且大于本机（本机无效视为 0）」：
+            // 远端 >0 即可提示更新，本机读不到版本（-1/0）时同样能被新版本覆盖修复。
+            if (theirs <= 0) return false;
+            if (mine < 0) mine = 0;
+            return theirs > mine;
         }
 
         private static long VersionNumber(string text)
@@ -54,7 +61,6 @@ namespace GuyueBox.Core
             return a * 100000000L + b * 10000L + c;
         }
     }
-
     /// <summary>
     /// 在线更新：从更新源拉取 version.json，比对版本号，下载新程序包并校验 SHA256，
     /// 最后通过外部脚本替换程序本体并重启。
@@ -129,6 +135,47 @@ namespace GuyueBox.Core
             }
         }
 
+        // ---------------- HttpClient（诊断报告 #8/#9）----------------
+        // WebClient 已过时：迁移 HttpClient 后统一超时与 TLS 策略。
+        // 进程级单例（连接复用），与 Theme.Font* 同生命周期策略，不随单次调用释放。
+        private static HttpClient _http;
+
+        private static HttpClient Http
+        {
+            get
+            {
+                if (_http == null)
+                {
+                    // 显式启用 TLS 1.2：4.8 默认按系统策略走（通常已含 Tls12），
+                    // 老旧系统拉 GitHub raw 时显式 |= 更稳
+                    try
+                    {
+                        ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+                    }
+                    catch { }
+                    HttpClientHandler handler = new HttpClientHandler();
+                    handler.AllowAutoRedirect = true;
+                    _http = new HttpClient(handler);
+                    _http.Timeout = TimeSpan.FromSeconds(60);
+                    _http.DefaultRequestHeaders.CacheControl =
+                        new System.Net.Http.Headers.CacheControlHeaderValue();
+                    _http.DefaultRequestHeaders.CacheControl.NoCache = true;
+                    _http.DefaultRequestHeaders.Add("User-Agent", "GuyueBox-UpdateCheck"); // GitHub 要求非空 UA
+                }
+                return _http;
+            }
+        }
+
+        /// <summary>同步 GET 文本。HttpClient 只有异步 API——用 Task.Run 切到线程池上下文再等，
+        /// 避免在 WinForms UI 线程同步等待时 continuation 回 UI 上下文造成死锁。</summary>
+        private static string GetStringBlocking(string url)
+        {
+            return Task.Run(delegate
+            {
+                return Http.GetStringAsync(url).Result;
+            }).Result;
+        }
+
         /// <summary>拉取更新描述文件。失败时 Ok=false 并带 Error。</summary>
         public static UpdateInfo Check()
         {
@@ -143,20 +190,14 @@ namespace GuyueBox.Core
             {
                 string url = UpdateSource();
                 string json;
-                using (WebClient wc = new WebClient())
+                string target = url;
+                // 仅对 http(s) 加缓存穿透参数（file:// 等本地测试地址不支持 query）
+                if (url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
                 {
-                    wc.Headers["Cache-Control"] = "no-cache";
-                    wc.Headers["User-Agent"] = "GuyueBox-UpdateCheck"; // GitHub 要求非空 UA
-                    wc.Encoding = Encoding.UTF8;
-                    string target = url;
-                    // 仅对 http(s) 加缓存穿透参数（file:// 等本地测试地址不支持 query）
-                    if (url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-                    {
-                        target = url + (url.IndexOf('?') >= 0 ? "&" : "?") + "t=" +
-                            Environment.TickCount.ToString(CultureInfo.InvariantCulture);
-                    }
-                    json = wc.DownloadString(target);
+                    target = url + (url.IndexOf('?') >= 0 ? "&" : "?") + "t=" +
+                        Environment.TickCount.ToString(CultureInfo.InvariantCulture);
                 }
+                json = GetStringBlocking(target);
 
                 info.Version = JsonField(json, "version");
                 info.Url = JsonField(json, "url");
@@ -181,7 +222,8 @@ namespace GuyueBox.Core
             return Download(info, out file, out error, null);
         }
 
-        /// <summary>下载新版本；onPercent 在工作线程回调 0-100 的下载进度。</summary>
+        /// <summary>下载新版本；onPercent 在工作线程回调 0-100 的下载进度。
+        /// 流式拷贝计算进度（HttpClient 无 WebClient 的 DownloadProgressChanged 事件）。</summary>
         public static bool Download(UpdateInfo info, out string file, out string error, Action<int> onPercent)
         {
             file = "";
@@ -191,17 +233,37 @@ namespace GuyueBox.Core
                 string tmp = Path.Combine(Path.GetTempPath(), "GuyueBox_update_" +
                     DateTime.Now.Ticks.ToString(CultureInfo.InvariantCulture) + ".exe");
 
-                using (WebClient wc = new WebClient())
+                // 线程池上下文执行异步下载再同步等待（同 GetStringBlocking 的死锁防护）
+                Task.Run(delegate
                 {
-                    if (onPercent != null)
+                    using (HttpResponseMessage resp =
+                        Http.GetAsync(info.Url, HttpCompletionOption.ResponseHeadersRead).Result)
                     {
-                        wc.DownloadProgressChanged += delegate (object s, DownloadProgressChangedEventArgs e)
+                        if (!resp.IsSuccessStatusCode)
                         {
-                            try { onPercent(e.ProgressPercentage); } catch { }
-                        };
+                            throw new InvalidOperationException("下载失败：HTTP " +
+                                (int)resp.StatusCode + " " + resp.ReasonPhrase);
+                        }
+                        long? total = resp.Content.Headers.ContentLength;
+                        using (Stream src = resp.Content.ReadAsStreamAsync().Result)
+                        using (FileStream fs = File.Create(tmp))
+                        {
+                            byte[] buf = new byte[81920];
+                            long read = 0;
+                            int n;
+                            while ((n = src.Read(buf, 0, buf.Length)) > 0)
+                            {
+                                fs.Write(buf, 0, n);
+                                read += n;
+                                if (onPercent != null && total.HasValue && total.Value > 0)
+                                {
+                                    int pct = (int)(read * 100 / total.Value);
+                                    try { onPercent(pct); } catch { }
+                                }
+                            }
+                        }
                     }
-                    wc.DownloadFile(info.Url, tmp);
-                }
+                }).Wait();
 
                 // 供应链安全：update.json 必须提供 SHA256，缺失则拒绝安装（管理员工具被替换的后果严重）
                 if (string.IsNullOrEmpty(info.Sha256))
@@ -249,16 +311,9 @@ namespace GuyueBox.Core
                 sb.AppendLine("Start-Process -FilePath '" + current.Replace("'", "''") + "'");
 
                 File.WriteAllText(script, sb.ToString(), new UTF8Encoding(true)); // BOM：中文路径不乱码
-                using (System.Diagnostics.Process p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "powershell.exe",
-                    Arguments = "-NoProfile -ExecutionPolicy Bypass -File \"" + script + "\"",
-                    CreateNoWindow = true,
-                    UseShellExecute = false
-                }))
-                {
-                    // 火忘：不 WaitForExit，调用方立即 Application.Exit，脚本独立完成替换与重启
-                }
+                // 经 Shell 受控边界启动（仍过白名单 + 危险模式护栏），不等待脚本结束：
+                // 脚本会在 2 秒后结束本进程并替换重启，调用方随后立即 Application.Exit。
+                Shell.RunDetached("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -File \"" + script + "\"");
                 return true;
             }
             catch
